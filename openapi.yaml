@@ -1,0 +1,2032 @@
+openapi: 3.1.0
+
+# =============================================================================
+# SIKA BOX — Contrat API REST
+# =============================================================================
+# Ce contrat décrit l'interface complète entre le frontend (PWA React) et le
+# backend (Supabase PostgREST + Edge Functions).
+# Référence : 00_BIBLE_PROJET.md, 01_ARCHITECTURE_TECHNIQUE.md, 02_NORMES_OPERATIONNELLES.md
+# =============================================================================
+
+info:
+  title: Sika Box API
+  version: 1.0.0
+  description: |
+    API REST pour l'application Sika Box — gestion financière avec séparation
+    automatique des caisses pour micro-entreprises au Bénin.
+
+    ## Authentification
+    Toutes les routes (sauf `/auth/login`) nécessitent un token JWT Bearer.
+    Les rôles `ADMIN` et `GESTIONNAIRE` sont vérifiés par Row Level Security
+    sur PostgreSQL et par les Edge Functions.
+
+    ## Devise
+    Tous les montants sont en **FCFA (XOF)**, représentés en **entiers** (pas de décimales).
+
+    ## Erreurs
+    Toutes les réponses d'erreur suivent le standard **RFC 7807** (Problem Details).
+  contact:
+    name: Sika Box Dev Team
+  license:
+    name: Private
+    identifier: LicenseRef-Proprietary
+
+servers:
+  - url: https://{project-ref}.supabase.co
+    description: Production (Supabase Cloud)
+    variables:
+      project-ref:
+        default: your-project-ref
+        description: Référence du projet Supabase
+  - url: http://localhost:54321
+    description: Développement local (Supabase Local via Docker)
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentification
+    description: Connexion, déconnexion et gestion de session (E1)
+  - name: Administration
+    description: Variables Globales, gestion du compte Gestionnaire (E2)
+  - name: Vente Textile
+    description: Saisie et consultation des ventes textiles (E3)
+  - name: Opérations MoMo
+    description: Dépôts, retraits et commissions Mobile Money (E4)
+  - name: Correction
+    description: Correction de transaction dans la Fenêtre de 10 minutes (E11)
+  - name: Caisses
+    description: Soldes et historiques des caisses (E6)
+  - name: Historique
+    description: Journal des transactions (E7)
+  - name: Reporting
+    description: Rapports trimestriels (E8)
+  - name: Synchronisation
+    description: Sync offline ↔ cloud (E9)
+
+# =============================================================================
+# PATHS — ENDPOINTS
+# =============================================================================
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # MODULE : AUTHENTIFICATION (E1)
+  # ---------------------------------------------------------------------------
+
+  /auth/v1/token:
+    post:
+      operationId: login
+      tags: [Authentification]
+      summary: Connexion utilisateur
+      description: |
+        Authentifie un utilisateur (Admin ou Gestionnaire) et retourne un token JWT.
+        Le token contient le rôle dans les custom claims (`role: ADMIN | GESTIONNAIRE`).
+        Endpoint Supabase GoTrue standard.
+      security: [] # Pas de token requis pour le login
+      parameters:
+        - name: grant_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [password]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: gestionnaire@sikabox.app
+              password: motdepasse123
+      responses:
+        '200':
+          description: Authentification réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: https://sikabox.app/erreurs/auth/identifiants-invalides
+                title: Identifiants invalides
+                status: 400
+                detail: Email ou mot de passe incorrect.
+        '403':
+          description: Compte désactivé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: https://sikabox.app/erreurs/auth/compte-desactive
+                title: Compte désactivé
+                status: 403
+                detail: Ce compte a été désactivé par l'administrateur.
+
+  /auth/v1/logout:
+    post:
+      operationId: logout
+      tags: [Authentification]
+      summary: Déconnexion utilisateur
+      description: Invalide le token JWT et termine la session.
+      responses:
+        '204':
+          description: Déconnexion réussie
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /auth/v1/user:
+    get:
+      operationId: getUtilisateurCourant
+      tags: [Authentification]
+      summary: Profil de l'utilisateur connecté
+      description: Retourne les informations de l'utilisateur authentifié (rôle, statut, identifiant).
+      responses:
+        '200':
+          description: Profil utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utilisateur'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+    put:
+      operationId: modifierMotDePasse
+      tags: [Authentification]
+      summary: Modifier le mot de passe de l'utilisateur connecté
+      description: |
+        Permet de changer le mot de passe. Utilisé notamment lors de la
+        **première connexion** avec un mot de passe temporaire.
+        Endpoint Supabase GoTrue standard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangementMotDePasse'
+      responses:
+        '200':
+          description: Mot de passe modifié
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utilisateur'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '422':
+          description: Mot de passe invalide (trop court, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /auth/v1/token/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Authentification]
+      summary: Renouveler le token JWT
+      description: |
+        Obtient un nouveau `access_token` à partir du `refresh_token`.
+        Utilisé quand le token JWT a expiré (après 1 heure).
+        Endpoint Supabase GoTrue standard.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+                  description: Le refresh token obtenu lors du login.
+      responses:
+        '200':
+          description: Nouveau token JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Refresh token invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : ADMINISTRATION (E2)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/variables_globales:
+    get:
+      operationId: listerVariablesGlobales
+      tags: [Administration]
+      summary: Lister toutes les Variables Globales
+      description: |
+        Retourne l'ensemble des Variables Globales Configurables.
+        Accessible en lecture par l'Admin ET la Gestionnaire (RLS).
+      responses:
+        '200':
+          description: Liste des Variables Globales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VariableGlobale'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /rest/v1/variables_globales/{cle}:
+    patch:
+      operationId: modifierVariableGlobale
+      tags: [Administration]
+      summary: Modifier une Variable Globale
+      description: |
+        Modifie la valeur d'une Variable Globale. **Réservé au rôle ADMIN.**
+        Crée une entrée dans le Journal d'Audit.
+        La modification n'a pas d'effet rétroactif (ne modifie pas les transactions passées).
+      parameters:
+        - name: cle
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/CleVariableGlobale'
+          description: Clé unique de la Variable Globale à modifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModificationVariableGlobale'
+            example:
+              valeur: 600000
+      responses:
+        '200':
+          description: Variable Globale modifiée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VariableGlobale'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '404':
+          description: Variable Globale non trouvée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: Valeur invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: https://sikabox.app/erreurs/admin/ratios-invalides
+                title: Ratios invalides
+                status: 422
+                detail: La somme des Ratios de Répartition doit être égale à 100%.
+
+  /rest/v1/utilisateurs:
+    post:
+      operationId: creerCompteGestionnaire
+      tags: [Administration]
+      summary: Créer un compte Gestionnaire
+      description: |
+        Crée un nouveau compte Gestionnaire. **Réservé au rôle ADMIN.**
+        Le mot de passe est temporaire et devra être changé à la première connexion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreationGestionnaire'
+            example:
+              identifiant: gestionnaire@sikabox.app
+              mot_de_passe_temporaire: TempPass2026!
+      responses:
+        '201':
+          description: Compte Gestionnaire créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utilisateur'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '409':
+          description: Identifiant déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /rest/v1/utilisateurs/{id}/statut:
+    patch:
+      operationId: modifierStatutGestionnaire
+      tags: [Administration]
+      summary: Activer ou désactiver un compte Gestionnaire
+      description: |
+        Active ou désactive le compte Gestionnaire. **Réservé au rôle ADMIN.**
+        Un compte désactivé ne peut plus se connecter.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actif]
+              properties:
+                actif:
+                  type: boolean
+                  description: true pour activer, false pour désactiver.
+            example:
+              actif: false
+      responses:
+        '200':
+          description: Statut modifié
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Utilisateur'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '404':
+          description: Utilisateur non trouvé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /rest/v1/journal_audit:
+    get:
+      operationId: listerJournalAudit
+      tags: [Administration]
+      summary: Consulter le Journal d'Audit
+      description: |
+        Retourne la liste des entrées du Journal d'Audit (modifications de Variables Globales,
+        créations/désactivations de comptes, corrections de transactions).
+        **Réservé au rôle ADMIN.**
+      parameters:
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+        - name: action
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ActionAudit'
+          description: Filtrer par type d'action.
+      responses:
+        '200':
+          description: Liste des entrées d'audit
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JournalAudit'
+          headers:
+            Content-Range:
+              description: Nombre total d'entrées (pagination)
+              schema:
+                type: string
+                example: "0-24/150"
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : VENTE TEXTILE (E3)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/transactions/vente-textile:
+    post:
+      operationId: creerVenteTextile
+      tags: [Vente Textile]
+      summary: Enregistrer une vente textile
+      description: |
+        Crée une transaction de type Vente Textile. **Réservé au rôle GESTIONNAIRE.**
+        Déclenche automatiquement la ventilation :
+        - CA → Caisse Stock
+        - Bénéfice Net (PV − CA) → réparti selon les Ratios
+        Retourne le détail de la ventilation.
+        La transaction est modifiable pendant 10 minutes (Fenêtre de Correction).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NouvelleVenteTextile'
+            example:
+              prix_de_vente: 15000
+              cout_achat: 10000
+              designation: "Guipure bleue brodée"
+      responses:
+        '201':
+          description: Vente textile enregistrée avec détail de la ventilation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAvecVentilation'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '422':
+          description: Données de vente invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                vente_a_perte:
+                  summary: Vente à perte (PV < CA)
+                  value:
+                    type: https://sikabox.app/erreurs/validation/vente-a-perte
+                    title: Vente à perte non autorisée
+                    status: 422
+                    detail: "Le Prix de Vente (8 000 FCFA) est inférieur au Coût d'Achat (10 000 FCFA)."
+                    extensions:
+                      code: VENTE_A_PERTE
+                      pv: 8000
+                      ca: 10000
+                montant_invalide:
+                  summary: Montant invalide
+                  value:
+                    type: https://sikabox.app/erreurs/validation/montant-invalide
+                    title: Montant invalide
+                    status: 422
+                    detail: "Le Prix de Vente doit être supérieur à 0."
+                    extensions:
+                      code: MONTANT_INVALIDE
+
+  # ---------------------------------------------------------------------------
+  # MODULE : OPÉRATIONS MOMO (E4)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/operateurs_momo:
+    get:
+      operationId: listerOperateursMomo
+      tags: [Opérations MoMo]
+      summary: Lister les Opérateurs MoMo et leurs soldes
+      description: |
+        Retourne la liste des Opérateurs MoMo avec leur Fonds de Roulement courant.
+        Accessible par les deux rôles (ADMIN et GESTIONNAIRE).
+      responses:
+        '200':
+          description: Liste des Opérateurs MoMo
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OperateurMomo'
+              example:
+                - id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  nom: MTN Mobile Money
+                  solde_initial: 200000
+                  solde_courant: 185000
+                  actif: true
+                - id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                  nom: Moov Money
+                  solde_initial: 150000
+                  solde_courant: 162000
+                  actif: true
+                - id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                  nom: Celtis Cash
+                  solde_initial: 100000
+                  solde_courant: 97000
+                  actif: true
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /rest/v1/operateurs_momo/{id}:
+    patch:
+      operationId: configurerOperateurMomo
+      tags: [Administration]
+      summary: Configurer un Opérateur MoMo
+      description: |
+        Permet à l'Admin de configurer un Opérateur MoMo :
+        - Modifier le Solde Initial du Fonds de Roulement MoMo.
+        - Activer ou désactiver un Opérateur.
+        **Réservé au rôle ADMIN.**
+        La modification du `solde_initial` met aussi à jour le `solde_courant`
+        si c'est la première configuration (solde_courant == 0).
+        Crée une entrée dans le Journal d'Audit.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de l'Opérateur MoMo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                solde_initial:
+                  type: integer
+                  description: Nouveau Solde Initial du Fonds de Roulement MoMo (en FCFA).
+                  minimum: 0
+                  example: 200000
+                actif:
+                  type: boolean
+                  description: Activer ou désactiver l'Opérateur.
+            example:
+              solde_initial: 200000
+      responses:
+        '200':
+          description: Opérateur MoMo configuré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperateurMomo'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '404':
+          description: Opérateur MoMo non trouvé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /rest/v1/transactions/momo/operation:
+    post:
+      operationId: creerOperationMomo
+      tags: [Opérations MoMo]
+      summary: Enregistrer une opération MoMo (Dépôt ou Retrait)
+      description: |
+        Crée une transaction MoMo de type Dépôt ou Retrait. **Réservé au rôle GESTIONNAIRE.**
+        - Dépôt : le Fonds de Roulement MoMo de l'Opérateur **diminue** (e-float consommé).
+        - Retrait : le Fonds de Roulement MoMo de l'Opérateur **augmente** (e-float recrédité).
+        **Aucune commission n'est saisie ici** — la commission est saisie séparément.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NouvelleOperationMomo'
+            example:
+              type_operation: DEPOT
+              montant: 25000
+              operateur_momo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '201':
+          description: Opération MoMo enregistrée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '422':
+          description: Opération invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              examples:
+                fonds_insuffisant:
+                  summary: Fonds de roulement insuffisant pour un dépôt
+                  value:
+                    type: https://sikabox.app/erreurs/momo/fonds-insuffisant
+                    title: Fonds de roulement MoMo insuffisant
+                    status: 422
+                    detail: "Le Fonds de Roulement MoMo de MTN Mobile Money (185 000 FCFA) est insuffisant pour un dépôt de 200 000 FCFA."
+                    extensions:
+                      code: FONDS_INSUFFISANT
+                      operateur: MTN Mobile Money
+                      solde_courant: 185000
+                      montant_demande: 200000
+
+  /rest/v1/transactions/momo/commission:
+    post:
+      operationId: creerCommissionMomo
+      tags: [Opérations MoMo]
+      summary: Saisir une commission MoMo (différée)
+      description: |
+        Enregistre la commission accumulée pour un Opérateur MoMo.
+        **Réservé au rôle GESTIONNAIRE.**
+        La commission est traitée comme un Bénéfice Net et ventilée selon les Ratios.
+        Cette saisie peut être faite à tout moment (saisie différée).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NouvelleCommissionMomo'
+            example:
+              montant_commission: 5000
+              operateur_momo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '201':
+          description: Commission MoMo enregistrée avec détail de la ventilation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAvecVentilation'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '422':
+          description: Montant de commission invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /rest/v1/rappel_commission:
+    get:
+      operationId: verifierRappelCommission
+      tags: [Opérations MoMo]
+      summary: Vérifier si un Rappel de Commission est dû
+      description: |
+        Vérifie pour chaque Opérateur MoMo si la dernière saisie de commission
+        dépasse la fréquence configurée (Variable Globale `frequence_rappel_commission`).
+        Retourne la liste des Opérateurs concernés.
+        **Accessible par la GESTIONNAIRE.**
+      responses:
+        '200':
+          description: État du rappel de commission par Opérateur
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RappelCommission'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : CORRECTION DE TRANSACTION (E11)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/transactions/{id}/correction:
+    patch:
+      operationId: corrigerTransaction
+      tags: [Correction]
+      summary: Corriger une transaction dans la Fenêtre de Correction
+      description: |
+        Modifie une transaction existante dans la **Fenêtre de Correction de 10 minutes**.
+        **Réservé au rôle GESTIONNAIRE**, uniquement sur ses propres transactions.
+        La correction :
+        1. Annule les Mouvements de Caisse initiaux (écritures inverses).
+        2. Génère de nouveaux Mouvements de Caisse basés sur les valeurs corrigées.
+        3. Sauvegarde les valeurs avant correction dans le champ `valeurs_avant_correction`.
+        Après expiration de la fenêtre (10 min), le endpoint retourne `403`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID de la transaction à corriger.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionTransaction'
+            example:
+              prix_de_vente: 12000
+              cout_achat: 7000
+      responses:
+        '200':
+          description: Transaction corrigée, nouvelle ventilation calculée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAvecVentilation'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          description: Fenêtre de Correction expirée ou accès interdit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: https://sikabox.app/erreurs/correction/fenetre-expiree
+                title: Fenêtre de Correction expirée
+                status: 403
+                detail: "La Fenêtre de Correction de 10 minutes est expirée. Cette transaction est désormais immutable."
+                extensions:
+                  code: FENETRE_EXPIREE
+                  transaction_id: "550e8400-e29b-41d4-a716-446655440000"
+                  cree_le: "2026-03-06T14:30:00Z"
+                  fenetre_expiration: "2026-03-06T14:40:00Z"
+        '404':
+          description: Transaction non trouvée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: Données de correction invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : CAISSES (E6)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/caisses/soldes:
+    get:
+      operationId: lireSoldesCaisses
+      tags: [Caisses]
+      summary: Consulter les soldes de toutes les caisses
+      description: |
+        Retourne les soldes courants de toutes les caisses (Stock, Salaire, Remboursement,
+        Réserve) ainsi que les Fonds de Roulement MoMo par Opérateur.
+        Inclut la progression du remboursement (pour l'Admin).
+        Accessible par les deux rôles.
+      responses:
+        '200':
+          description: Soldes des caisses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableauDeBord'
+              example:
+                caisses:
+                  - type: STOCK
+                    solde: 350000
+                    statut: BLOQUE
+                    couleur: rouge
+                  - type: SALAIRE
+                    solde: 125000
+                    statut: LIBRE
+                    couleur: vert
+                  - type: REMBOURSEMENT
+                    solde: 230000
+                    statut: BLOQUE
+                    couleur: rouge
+                  - type: RESERVE
+                    solde: 80000
+                    statut: SEMI_BLOQUE
+                    couleur: orange
+                fonds_roulement_momo:
+                  - operateur_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    operateur_nom: MTN Mobile Money
+                    solde_courant: 185000
+                    couleur: bleu
+                  - operateur_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                    operateur_nom: Moov Money
+                    solde_courant: 162000
+                    couleur: bleu
+                  - operateur_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    operateur_nom: Celtis Cash
+                    solde_courant: 97000
+                    couleur: bleu
+                progression_remboursement:
+                  solde_rembourse: 230000
+                  plafond_capital: 500000
+                  pourcentage: 46
+                  plafond_atteint: false
+                total_libre: 125000
+                rappels_commission_en_attente: 1
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /rest/v1/mouvements_caisse:
+    get:
+      operationId: listerMouvementsCaisse
+      tags: [Caisses]
+      summary: Historique des mouvements d'une caisse
+      description: |
+        Retourne les mouvements de caisse filtrés par type de caisse et/ou opérateur MoMo.
+        Ordre chronologique inversé (plus récents en premier).
+      parameters:
+        - name: caisse
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TypeCaisse'
+          description: Filtrer par type de caisse.
+        - name: operateur_momo_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filtrer par Opérateur MoMo (uniquement pour FONDS_ROULEMENT_MOMO).
+        - name: date_debut
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date de début (inclusive).
+        - name: date_fin
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date de fin (inclusive).
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Liste des mouvements de caisse
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MouvementCaisse'
+          headers:
+            Content-Range:
+              description: Pagination
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : HISTORIQUE DES TRANSACTIONS (E7)
+  # ---------------------------------------------------------------------------
+
+  /rest/v1/transactions:
+    get:
+      operationId: listerTransactions
+      tags: [Historique]
+      summary: Lister les transactions
+      description: |
+        Retourne les transactions avec détails de ventilation.
+        - **GESTIONNAIRE** : voit uniquement ses propres transactions (RLS).
+        - **ADMIN** : voit toutes les transactions.
+        Ordre chronologique inversé (plus récentes en premier).
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TypeTransaction'
+          description: Filtrer par type de transaction.
+        - name: operateur_momo_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filtrer par Opérateur MoMo.
+        - name: date_debut
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date de début (inclusive).
+        - name: date_fin
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date de fin (inclusive).
+        - name: corrigee
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filtrer les transactions corrigées uniquement.
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Limit'
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            default: cree_le.desc
+          description: Tri (PostgREST format).
+      responses:
+        '200':
+          description: Liste des transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransactionAvecVentilation'
+          headers:
+            Content-Range:
+              description: Pagination (ex. 0-24/150)
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /rest/v1/transactions/{id}:
+    get:
+      operationId: lireTransaction
+      tags: [Historique]
+      summary: Détail d'une transaction
+      description: |
+        Retourne le détail complet d'une transaction avec sa ventilation et son historique de correction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détail de la transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionAvecVentilation'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '404':
+          description: Transaction non trouvée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : REPORTING (E8)
+  # ---------------------------------------------------------------------------
+
+  /functions/v1/rapports/trimestriel:
+    post:
+      operationId: genererRapportTrimestriel
+      tags: [Reporting]
+      summary: Générer un rapport trimestriel
+      description: |
+        Génère un rapport trimestriel à la demande. **Réservé au rôle ADMIN.**
+        Le rapport agrège les données de la période demandée.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DemandeRapport'
+            example:
+              annee: 2026
+              trimestre: 1
+      responses:
+        '200':
+          description: Rapport trimestriel généré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RapportTrimestriel'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+        '403':
+          $ref: '#/components/responses/AccesInterdit'
+        '422':
+          description: Période invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  # ---------------------------------------------------------------------------
+  # MODULE : SYNCHRONISATION (E9)
+  # ---------------------------------------------------------------------------
+
+  /functions/v1/sync/push:
+    post:
+      operationId: syncPush
+      tags: [Synchronisation]
+      summary: Pousser les transactions locales vers le cloud
+      description: |
+        Envoie un lot de transactions créées en mode offline vers le serveur.
+        Chaque transaction est **revalidée côté serveur** via `@sikabox/core`.
+        Les transactions valides sont persistées dans PostgreSQL.
+        Les transactions invalides sont retournées avec leur erreur.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncPushRequest'
+      responses:
+        '200':
+          description: Résultat de la synchronisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPushResponse'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /functions/v1/sync/pull:
+    get:
+      operationId: syncPull
+      tags: [Synchronisation]
+      summary: Tirer les mises à jour depuis le cloud
+      description: |
+        Récupère les données modifiées depuis le dernier timestamp de synchronisation.
+        Retourne les Variables Globales mises à jour, les nouvelles transactions
+        (si créées par l'Admin ultérieurement — rare), et les changements d'état du compte.
+      parameters:
+        - name: depuis
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Timestamp de la dernière synchronisation réussie.
+      responses:
+        '200':
+          description: Données mises à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPullResponse'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
+components:
+
+  # ---------------------------------------------------------------------------
+  # SÉCURITÉ
+  # ---------------------------------------------------------------------------
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtenu via `/auth/v1/token`.
+        Le token contient le rôle de l'utilisateur dans les custom claims :
+        `{ "role": "ADMIN" }` ou `{ "role": "GESTIONNAIRE" }`.
+        Expiration : 1 heure. Renouvelable via refresh token.
+
+  # ---------------------------------------------------------------------------
+  # PARAMÈTRES RÉUTILISABLES
+  # ---------------------------------------------------------------------------
+  parameters:
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Nombre d'éléments à sauter (pagination).
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+      description: Nombre maximum d'éléments à retourner (pagination).
+
+  # ---------------------------------------------------------------------------
+  # RÉPONSES RÉUTILISABLES
+  # ---------------------------------------------------------------------------
+  responses:
+    NonAuthentifie:
+      description: Token JWT absent, expiré ou invalide
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: https://sikabox.app/erreurs/auth/session-expiree
+            title: Session expirée
+            status: 401
+            detail: Le token JWT est absent ou a expiré. Veuillez vous reconnecter.
+            extensions:
+              code: SESSION_EXPIREE
+
+    AccesInterdit:
+      description: Rôle insuffisant pour cette opération
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: https://sikabox.app/erreurs/auth/acces-interdit
+            title: Accès interdit
+            status: 403
+            detail: Cette opération est réservée au rôle ADMIN.
+            extensions:
+              code: ACCES_INTERDIT
+
+  # ---------------------------------------------------------------------------
+  # SCHÉMAS (COMPONENTS/SCHEMAS)
+  # ---------------------------------------------------------------------------
+  schemas:
+
+    # =========================================================================
+    # ENUMS DU DOMAINE
+    # =========================================================================
+
+    RoleUtilisateur:
+      type: string
+      enum: [ADMIN, GESTIONNAIRE]
+      description: Rôle de l'utilisateur dans le système.
+
+    TypeTransaction:
+      type: string
+      enum: [VENTE_TEXTILE, MOMO_DEPOT, MOMO_RETRAIT, COMMISSION_MOMO]
+      description: |
+        Type de transaction :
+        - `VENTE_TEXTILE` : vente d'un article textile.
+        - `MOMO_DEPOT` : dépôt MoMo pour un client (e-float diminue).
+        - `MOMO_RETRAIT` : retrait MoMo pour un client (e-float augmente).
+        - `COMMISSION_MOMO` : saisie différée de la commission accumulée.
+
+    TypeCaisse:
+      type: string
+      enum: [STOCK, SALAIRE, REMBOURSEMENT, RESERVE, FONDS_ROULEMENT_MOMO]
+      description: |
+        Type de caisse :
+        - `STOCK` : capital pour reconstituer le stock (🔴 bloqué).
+        - `SALAIRE` : dépenses personnelles de la Gestionnaire (🟢 libre).
+        - `REMBOURSEMENT` : remboursement du capital investi (🔴 bloqué).
+        - `RESERVE` : réinvestissement dans le commerce (🟠 semi-bloqué).
+        - `FONDS_ROULEMENT_MOMO` : e-float Mobile Money par Opérateur (🔵 isolé).
+
+    StatutCaisse:
+      type: string
+      enum: [LIBRE, BLOQUE, SEMI_BLOQUE, ISOLE]
+      description: Statut d'accessibilité de la caisse.
+
+    CouleurCaisse:
+      type: string
+      enum: [vert, rouge, orange, bleu]
+      description: Code couleur UX de la caisse.
+
+    CleVariableGlobale:
+      type: string
+      enum:
+        - plafond_capital
+        - ratio_salaire
+        - ratio_remboursement
+        - ratio_reserve
+        - ratio_post_plafond_salaire
+        - ratio_post_plafond_reserve
+        - frequence_rappel_commission
+        - verrouillage_inactivite
+      description: |
+        Clé d'une Variable Globale Configurable.
+        Les ratios sont en pourcentages entiers (ex: 50 pour 50%).
+        Le plafond est en FCFA.
+        La fréquence de rappel est en jours.
+        Le verrouillage est en minutes.
+
+    ActionAudit:
+      type: string
+      enum:
+        - MODIFICATION_VARIABLE
+        - CREATION_COMPTE
+        - DESACTIVATION_COMPTE
+        - ACTIVATION_COMPTE
+        - CORRECTION_TRANSACTION
+      description: Type d'action enregistrée dans le Journal d'Audit.
+
+    # =========================================================================
+    # OBJETS PRINCIPAUX DU DOMAINE
+    # =========================================================================
+
+    Utilisateur:
+      type: object
+      description: Représente un utilisateur du système (Admin ou Gestionnaire).
+      required: [id, identifiant, role, actif, cree_le]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifiant unique (UUID v4).
+          readOnly: true
+        identifiant:
+          type: string
+          description: Identifiant de connexion (email ou pseudonyme).
+          example: gestionnaire@sikabox.app
+        role:
+          $ref: '#/components/schemas/RoleUtilisateur'
+        actif:
+          type: boolean
+          description: Indique si le compte est actif. Un compte inactif ne peut pas se connecter.
+          example: true
+        cree_le:
+          type: string
+          format: date-time
+          description: Date de création du compte.
+          readOnly: true
+
+    VariableGlobale:
+      type: object
+      description: |
+        Paramètre système modifiable uniquement par l'Admin.
+        Affecte la répartition financière pour les transactions futures (pas rétroactif).
+      required: [id, cle, valeur, modifie_le]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        cle:
+          $ref: '#/components/schemas/CleVariableGlobale'
+        valeur:
+          type: integer
+          description: |
+            Valeur de la variable (entier).
+            - Ratios : pourcentage (ex: 50 pour 50%).
+            - Plafond : montant en FCFA (ex: 500000).
+            - Fréquence rappel : nombre de jours (ex: 3).
+            - Verrouillage : nombre de minutes (ex: 5).
+          example: 500000
+        modifie_le:
+          type: string
+          format: date-time
+          description: Date de dernière modification.
+          readOnly: true
+        modifie_par:
+          type: string
+          format: uuid
+          description: ID de l'utilisateur qui a effectué la dernière modification.
+          readOnly: true
+
+    OperateurMomo:
+      type: object
+      description: |
+        Fournisseur de services Mobile Money. Chaque Opérateur dispose de son propre
+        Fonds de Roulement isolé.
+      required: [id, nom, solde_initial, solde_courant, actif]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        nom:
+          type: string
+          enum: [MTN Mobile Money, Moov Money, Celtis Cash]
+          description: Nom de l'Opérateur MoMo.
+        solde_initial:
+          type: integer
+          description: Solde Initial du Fonds de Roulement MoMo saisi à la configuration (en FCFA).
+          minimum: 0
+          example: 200000
+        solde_courant:
+          type: integer
+          description: Solde courant du Fonds de Roulement MoMo (en FCFA). Mis à jour automatiquement.
+          example: 185000
+        actif:
+          type: boolean
+          description: Indique si l'Opérateur est actif.
+
+    Transaction:
+      type: object
+      description: |
+        Événement commercial enregistré par la Gestionnaire. Génère automatiquement
+        des Mouvements de Caisse. Immutable après la Fenêtre de Correction (10 min).
+      required: [id, type, montant, benefice_net, cree_par, cree_le, corrigee, fenetre_expiration, synchronisee]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        type:
+          $ref: '#/components/schemas/TypeTransaction'
+        designation:
+          type: string
+          nullable: true
+          description: Désignation de l'article (texte libre). Présent uniquement pour VENTE_TEXTILE.
+          example: "Guipure bleue brodée"
+        montant:
+          type: integer
+          description: |
+            Montant principal de la transaction (en FCFA) :
+            - VENTE_TEXTILE : Prix de Vente (PV).
+            - MOMO_DEPOT / MOMO_RETRAIT : Montant de l'opération.
+            - COMMISSION_MOMO : Montant de la commission.
+          minimum: 1
+          example: 15000
+        cout_achat:
+          type: integer
+          nullable: true
+          description: Coût d'Achat (CA) en FCFA. Présent uniquement pour VENTE_TEXTILE.
+          minimum: 1
+          example: 10000
+        benefice_net:
+          type: integer
+          description: |
+            Bénéfice Net calculé (en FCFA) :
+            - VENTE_TEXTILE : PV − CA.
+            - COMMISSION_MOMO : montant de la commission.
+            - MOMO_DEPOT / MOMO_RETRAIT : 0 (pas de bénéfice direct).
+          minimum: 0
+          readOnly: true
+          example: 5000
+        operateur_momo_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID de l'Opérateur MoMo. Présent pour toutes les transactions MoMo.
+        operateur_momo_nom:
+          type: string
+          nullable: true
+          description: Nom de l'Opérateur MoMo (dénormalisé pour affichage).
+          example: "MTN Mobile Money"
+          readOnly: true
+        cree_par:
+          type: string
+          format: uuid
+          description: ID de l'utilisateur qui a créé la transaction.
+          readOnly: true
+        cree_le:
+          type: string
+          format: date-time
+          description: Date et heure de création.
+          readOnly: true
+        corrigee:
+          type: boolean
+          description: Indique si la transaction a été corrigée.
+          default: false
+        corrigee_le:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date et heure de la correction (si applicable).
+          readOnly: true
+        valeurs_avant_correction:
+          type: object
+          nullable: true
+          description: |
+            Snapshot des valeurs avant correction (JSON).
+            Contient les champs modifiés avec leurs anciennes valeurs.
+          additionalProperties: true
+          readOnly: true
+          example:
+            prix_de_vente: 14000
+            cout_achat: 9000
+        fenetre_expiration:
+          type: string
+          format: date-time
+          description: Date et heure d'expiration de la Fenêtre de Correction (cree_le + 10 min).
+          readOnly: true
+        fenetre_active:
+          type: boolean
+          description: Indique si la Fenêtre de Correction est encore active (calculé côté serveur).
+          readOnly: true
+        synchronisee:
+          type: boolean
+          description: Indique si la transaction est synchronisée avec le cloud.
+          default: false
+
+    TransactionAvecVentilation:
+      description: Transaction enrichie avec le détail de la ventilation par caisse.
+      allOf:
+        - $ref: '#/components/schemas/Transaction'
+        - type: object
+          properties:
+            ventilation:
+              type: array
+              description: Détail des mouvements de caisse générés par cette transaction.
+              items:
+                $ref: '#/components/schemas/MouvementCaisse'
+
+    MouvementCaisse:
+      type: object
+      description: |
+        Enregistrement unitaire d'une entrée ou sortie de fonds dans une Caisse.
+        Lié à une Transaction source. Immutable une fois créé.
+      required: [id, transaction_id, caisse, montant, cree_le]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        transaction_id:
+          type: string
+          format: uuid
+          description: ID de la transaction à l'origine de ce mouvement.
+        caisse:
+          $ref: '#/components/schemas/TypeCaisse'
+        operateur_momo_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID de l'Opérateur MoMo (uniquement si caisse = FONDS_ROULEMENT_MOMO).
+        montant:
+          type: integer
+          description: |
+            Montant du mouvement en FCFA.
+            - Positif = entrée (crédit).
+            - Négatif = sortie (débit) — uniquement pour les corrections (écritures inverses) 
+              ou les dépôts MoMo (e-float consommé).
+          example: 5000
+        cree_le:
+          type: string
+          format: date-time
+          readOnly: true
+
+    JournalAudit:
+      type: object
+      description: Entrée du journal d'audit. Enregistre les actions administratives et les corrections.
+      required: [id, utilisateur_id, action, details, cree_le]
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        utilisateur_id:
+          type: string
+          format: uuid
+          description: ID de l'utilisateur qui a effectué l'action.
+        action:
+          $ref: '#/components/schemas/ActionAudit'
+        details:
+          type: object
+          description: Détails de l'action (JSON libre).
+          additionalProperties: true
+          example:
+            cle: plafond_capital
+            ancienne_valeur: 500000
+            nouvelle_valeur: 600000
+        cree_le:
+          type: string
+          format: date-time
+          readOnly: true
+
+    # =========================================================================
+    # OBJETS DE VUE (DASHBOARD, RAPPORTS)
+    # =========================================================================
+
+    SoldeCaisse:
+      type: object
+      description: Solde d'une caisse avec métadonnées d'affichage.
+      required: [type, solde, statut, couleur]
+      properties:
+        type:
+          $ref: '#/components/schemas/TypeCaisse'
+        solde:
+          type: integer
+          description: Solde courant en FCFA.
+          example: 350000
+        statut:
+          $ref: '#/components/schemas/StatutCaisse'
+        couleur:
+          $ref: '#/components/schemas/CouleurCaisse'
+
+    SoldeFondsRoulement:
+      type: object
+      description: Solde du Fonds de Roulement MoMo d'un Opérateur.
+      required: [operateur_id, operateur_nom, solde_courant, couleur]
+      properties:
+        operateur_id:
+          type: string
+          format: uuid
+        operateur_nom:
+          type: string
+          example: MTN Mobile Money
+        solde_courant:
+          type: integer
+          example: 185000
+        couleur:
+          $ref: '#/components/schemas/CouleurCaisse'
+
+    ProgressionRemboursement:
+      type: object
+      description: Indicateur de progression du remboursement du capital.
+      required: [solde_rembourse, plafond_capital, pourcentage, plafond_atteint]
+      properties:
+        solde_rembourse:
+          type: integer
+          description: Montant total remboursé (solde Caisse Remboursement) en FCFA.
+          example: 230000
+        plafond_capital:
+          type: integer
+          description: Plafond de Capital en FCFA.
+          example: 500000
+        pourcentage:
+          type: integer
+          description: Pourcentage de progression (0-100).
+          minimum: 0
+          maximum: 100
+          example: 46
+        plafond_atteint:
+          type: boolean
+          description: Indique si le Plafond de Capital a été atteint.
+
+    TableauDeBord:
+      type: object
+      description: Données complètes du Tableau de Bord (E6).
+      required: [caisses, fonds_roulement_momo, progression_remboursement, total_libre, rappels_commission_en_attente]
+      properties:
+        caisses:
+          type: array
+          description: Soldes des 4 caisses principales.
+          items:
+            $ref: '#/components/schemas/SoldeCaisse'
+        fonds_roulement_momo:
+          type: array
+          description: Soldes des Fonds de Roulement par Opérateur MoMo.
+          items:
+            $ref: '#/components/schemas/SoldeFondsRoulement'
+        progression_remboursement:
+          $ref: '#/components/schemas/ProgressionRemboursement'
+        total_libre:
+          type: integer
+          description: Montant total librement disponible (= solde Caisse Salaire) en FCFA.
+          example: 125000
+        rappels_commission_en_attente:
+          type: integer
+          description: Nombre d'Opérateurs MoMo dont le Rappel de Commission est dû.
+          minimum: 0
+          example: 1
+
+    RappelCommission:
+      type: object
+      description: État du rappel de commission pour un Opérateur MoMo.
+      required: [operateur_id, operateur_nom, rappel_du, derniere_saisie, jours_depuis_derniere_saisie]
+      properties:
+        operateur_id:
+          type: string
+          format: uuid
+        operateur_nom:
+          type: string
+          example: MTN Mobile Money
+        rappel_du:
+          type: boolean
+          description: Indique si le rappel est dû (délai dépassé depuis la dernière saisie).
+        derniere_saisie:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date de la dernière saisie de commission (null si jamais saisie).
+        jours_depuis_derniere_saisie:
+          type: integer
+          nullable: true
+          description: Nombre de jours écoulés depuis la dernière saisie.
+          example: 5
+
+    RapportTrimestriel:
+      type: object
+      description: Rapport trimestriel généré à la demande par l'Admin (E8).
+      required:
+        - periode
+        - nombre_transactions
+        - chiffre_affaires_total
+        - benefice_net_total
+        - ventilation_cumulee
+        - soldes_actuels
+        - progression_remboursement
+        - nombre_corrections
+      properties:
+        periode:
+          type: object
+          required: [annee, trimestre, date_debut, date_fin]
+          properties:
+            annee:
+              type: integer
+              example: 2026
+            trimestre:
+              type: integer
+              minimum: 1
+              maximum: 4
+              example: 1
+            date_debut:
+              type: string
+              format: date
+              example: "2026-01-01"
+            date_fin:
+              type: string
+              format: date
+              example: "2026-03-31"
+        nombre_transactions:
+          type: object
+          required: [total, vente_textile, momo_depot, momo_retrait, commission_momo]
+          properties:
+            total:
+              type: integer
+              example: 245
+            vente_textile:
+              type: integer
+              example: 120
+            momo_depot:
+              type: integer
+              example: 65
+            momo_retrait:
+              type: integer
+              example: 45
+            commission_momo:
+              type: integer
+              example: 15
+        chiffre_affaires_total:
+          type: integer
+          description: Somme des PV (ventes textiles) + commissions MoMo. En FCFA.
+          example: 2500000
+        benefice_net_total:
+          type: integer
+          description: Somme des Bénéfices Nets de la période. En FCFA.
+          example: 850000
+        ventilation_cumulee:
+          type: object
+          description: Somme des mouvements de caisse sur la période.
+          required: [caisse_stock, caisse_salaire, caisse_remboursement, caisse_reserve]
+          properties:
+            caisse_stock:
+              type: integer
+              example: 1650000
+            caisse_salaire:
+              type: integer
+              example: 425000
+            caisse_remboursement:
+              type: integer
+              example: 255000
+            caisse_reserve:
+              type: integer
+              example: 170000
+        soldes_actuels:
+          $ref: '#/components/schemas/TableauDeBord'
+        progression_remboursement:
+          $ref: '#/components/schemas/ProgressionRemboursement'
+        nombre_corrections:
+          type: integer
+          description: Nombre de corrections effectuées sur la période.
+          example: 3
+
+    # =========================================================================
+    # OBJETS DE REQUÊTE (REQUEST BODIES)
+    # =========================================================================
+
+    LoginRequest:
+      type: object
+      description: Identifiants de connexion.
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Identifiant de connexion.
+          example: gestionnaire@sikabox.app
+        password:
+          type: string
+          format: password
+          description: Mot de passe.
+          minLength: 8
+
+    LoginResponse:
+      type: object
+      description: Réponse d'authentification avec tokens.
+      required: [access_token, token_type, expires_in, refresh_token, user]
+      properties:
+        access_token:
+          type: string
+          description: Token JWT d'accès (Bearer).
+        token_type:
+          type: string
+          enum: [bearer]
+        expires_in:
+          type: integer
+          description: Durée de validité du token en secondes (3600 = 1h).
+          example: 3600
+        refresh_token:
+          type: string
+          description: Token de renouvellement.
+        user:
+          $ref: '#/components/schemas/Utilisateur'
+
+    CreationGestionnaire:
+      type: object
+      description: Données pour créer un compte Gestionnaire.
+      required: [identifiant, mot_de_passe_temporaire]
+      properties:
+        identifiant:
+          type: string
+          format: email
+          description: Identifiant de connexion du nouveau Gestionnaire.
+          example: gestionnaire@sikabox.app
+        mot_de_passe_temporaire:
+          type: string
+          format: password
+          description: Mot de passe temporaire (à changer à la première connexion).
+          minLength: 8
+
+    ModificationVariableGlobale:
+      type: object
+      description: Nouvelle valeur pour une Variable Globale.
+      required: [valeur]
+      properties:
+        valeur:
+          type: integer
+          description: Nouvelle valeur (entier).
+          example: 600000
+
+    ChangementMotDePasse:
+      type: object
+      description: Données pour changer le mot de passe de l'utilisateur connecté.
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
+          description: Nouveau mot de passe.
+          minLength: 8
+
+    NouvelleVenteTextile:
+      type: object
+      description: Données de saisie d'une vente textile.
+      required: [prix_de_vente, cout_achat, designation]
+      properties:
+        prix_de_vente:
+          type: integer
+          description: Prix de Vente (PV) en FCFA. Doit être ≥ Coût d'Achat.
+          minimum: 1
+          example: 15000
+        cout_achat:
+          type: integer
+          description: Coût d'Achat (CA) en FCFA.
+          minimum: 1
+          example: 10000
+        designation:
+          type: string
+          description: Désignation de l'article (texte libre).
+          minLength: 1
+          maxLength: 200
+          example: "Guipure bleue brodée"
+
+    NouvelleOperationMomo:
+      type: object
+      description: Données de saisie d'une opération MoMo (Dépôt ou Retrait).
+      required: [type_operation, montant, operateur_momo_id]
+      properties:
+        type_operation:
+          type: string
+          enum: [DEPOT, RETRAIT]
+          description: Type d'opération MoMo.
+        montant:
+          type: integer
+          description: Montant de l'opération en FCFA.
+          minimum: 1
+          example: 25000
+        operateur_momo_id:
+          type: string
+          format: uuid
+          description: ID de l'Opérateur MoMo.
+
+    NouvelleCommissionMomo:
+      type: object
+      description: Données de saisie d'une commission MoMo (différée).
+      required: [montant_commission, operateur_momo_id]
+      properties:
+        montant_commission:
+          type: integer
+          description: Montant global de la commission accumulée en FCFA.
+          minimum: 1
+          example: 5000
+        operateur_momo_id:
+          type: string
+          format: uuid
+          description: ID de l'Opérateur MoMo.
+
+    CorrectionTransaction:
+      type: object
+      description: |
+        Données de correction d'une transaction. Seuls les champs à corriger sont envoyés.
+        Les champs non présents conservent leur valeur actuelle.
+      properties:
+        prix_de_vente:
+          type: integer
+          description: Nouveau Prix de Vente (pour VENTE_TEXTILE).
+          minimum: 1
+        cout_achat:
+          type: integer
+          description: Nouveau Coût d'Achat (pour VENTE_TEXTILE).
+          minimum: 1
+        designation:
+          type: string
+          description: Nouvelle désignation (pour VENTE_TEXTILE).
+          maxLength: 200
+        montant:
+          type: integer
+          description: Nouveau montant (pour opérations MoMo et commissions).
+          minimum: 1
+        operateur_momo_id:
+          type: string
+          format: uuid
+          description: Nouvel Opérateur MoMo.
+
+    DemandeRapport:
+      type: object
+      description: Paramètres de génération d'un rapport trimestriel.
+      required: [annee, trimestre]
+      properties:
+        annee:
+          type: integer
+          description: Année du rapport.
+          minimum: 2026
+          example: 2026
+        trimestre:
+          type: integer
+          description: Numéro du trimestre (1 à 4).
+          minimum: 1
+          maximum: 4
+          example: 1
+
+    # =========================================================================
+    # OBJETS DE SYNCHRONISATION
+    # =========================================================================
+
+    SyncPushRequest:
+      type: object
+      description: Lot de transactions à synchroniser vers le cloud.
+      required: [transactions, dernier_sync]
+      properties:
+        transactions:
+          type: array
+          description: Transactions créées ou corrigées en mode offline, non encore synchronisées.
+          items:
+            $ref: '#/components/schemas/TransactionSync'
+        dernier_sync:
+          type: string
+          format: date-time
+          description: Timestamp de la dernière synchronisation réussie.
+
+    TransactionSync:
+      type: object
+      description: Transaction en attente de synchronisation (créée en mode offline).
+      required: [id_local, type, montant, cree_le]
+      properties:
+        id_local:
+          type: string
+          format: uuid
+          description: ID généré côté client (UUID v4).
+        type:
+          $ref: '#/components/schemas/TypeTransaction'
+        designation:
+          type: string
+          nullable: true
+        montant:
+          type: integer
+          minimum: 1
+        cout_achat:
+          type: integer
+          nullable: true
+          minimum: 1
+        operateur_momo_id:
+          type: string
+          format: uuid
+          nullable: true
+        cree_le:
+          type: string
+          format: date-time
+        corrigee:
+          type: boolean
+          default: false
+        valeurs_avant_correction:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    SyncPushResponse:
+      type: object
+      description: Résultat de la synchronisation push.
+      required: [synchronisees, echouees, timestamp_serveur]
+      properties:
+        synchronisees:
+          type: array
+          description: IDs locaux des transactions synchronisées avec succès.
+          items:
+            type: object
+            required: [id_local, id_serveur]
+            properties:
+              id_local:
+                type: string
+                format: uuid
+                description: ID local de la transaction.
+              id_serveur:
+                type: string
+                format: uuid
+                description: ID attribué par le serveur.
+        echouees:
+          type: array
+          description: Transactions qui ont échoué la validation serveur.
+          items:
+            type: object
+            required: [id_local, erreur]
+            properties:
+              id_local:
+                type: string
+                format: uuid
+              erreur:
+                $ref: '#/components/schemas/ProblemDetails'
+        timestamp_serveur:
+          type: string
+          format: date-time
+          description: Timestamp du serveur à utiliser pour le prochain sync pull.
+
+    SyncPullResponse:
+      type: object
+      description: Données mises à jour à tirer depuis le cloud.
+      required: [variables_globales, operateurs_momo, compte_actif, timestamp_serveur]
+      properties:
+        variables_globales:
+          type: array
+          description: Variables Globales modifiées depuis le dernier sync.
+          items:
+            $ref: '#/components/schemas/VariableGlobale'
+        operateurs_momo:
+          type: array
+          description: Opérateurs MoMo avec soldes mis à jour.
+          items:
+            $ref: '#/components/schemas/OperateurMomo'
+        compte_actif:
+          type: boolean
+          description: Indique si le compte de l'utilisateur est toujours actif.
+        timestamp_serveur:
+          type: string
+          format: date-time
+          description: Timestamp du serveur à utiliser pour le prochain sync pull.
+
+    # =========================================================================
+    # ERREURS (RFC 7807 — PROBLEM DETAILS)
+    # =========================================================================
+
+    ProblemDetails:
+      type: object
+      description: |
+        Format d'erreur standardisé conforme à la RFC 7807 (Problem Details for HTTP APIs).
+        Toutes les réponses d'erreur de l'API utilisent ce format.
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI identifiant le type d'erreur. Sert de clé unique pour le traitement côté client.
+          example: https://sikabox.app/erreurs/validation/vente-a-perte
+        title:
+          type: string
+          description: Titre court et lisible de l'erreur.
+          example: Vente à perte non autorisée
+        status:
+          type: integer
+          description: Code HTTP de l'erreur.
+          example: 422
+        detail:
+          type: string
+          description: Explication détaillée et contextualisée de l'erreur.
+          example: "Le Prix de Vente (8 000 FCFA) est inférieur au Coût d'Achat (10 000 FCFA)."
+        instance:
+          type: string
+          format: uri
+          description: URI de la ressource concernée par l'erreur.
+          example: /api/transactions/550e8400-e29b-41d4-a716-446655440000
+        extensions:
+          type: object
+          description: Données supplémentaires spécifiques à l'erreur.
+          additionalProperties: true
+          properties:
+            code:
+              type: string
+              description: Code d'erreur machine-readable.
+              example: VENTE_A_PERTE
+            timestamp:
+              type: string
+              format: date-time
+              description: Horodatage de l'erreur.
