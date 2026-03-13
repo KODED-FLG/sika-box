@@ -75,183 +75,21 @@ curl -X POST http://localhost:4010/rest/v1/transactions/vente-textile \
 
 ---
 
-## 2. Contract Testing avec Pact
+## 2. ~~Contract Testing avec Pact~~ — RETIRÉ (ADR-007)
 
-[Pact](https://pact.io/) garantit que le contrat entre le frontend (consumer) et le backend (provider) reste synchronisé.
-
-### Stratégie
-
-```
-┌──────────────────┐        ┌───────────────────┐
-│   Consumer        │        │   Provider         │
-│   (React PWA)     │───────▶│   (Supabase +      │
-│                   │ Pact   │    Edge Functions)  │
-│   Génère les      │ File   │                    │
-│   contrats        │        │   Vérifie les      │
-│                   │        │   contrats          │
-└──────────────────┘        └───────────────────┘
-```
-
-### Workflow
-
-1. **Consumer-Side** : Le frontend écrit des **Pact Tests** qui décrivent les interactions attendues avec l'API.
-2. **Pact File** : Un fichier `.json` est généré, décrivant chaque interaction (requête → réponse attendue).
-3. **Provider-Side** : Le backend vérifie que ses réponses réelles correspondent au contrat Pact.
-
-### Installation
-
-```bash
-# Consumer (frontend)
-cd packages/frontend
-pnpm add -D @pact-foundation/pact
-
-# Provider (supabase edge functions — si vérification locale)
-cd packages/supabase
-pnpm add -D @pact-foundation/pact
-```
-
-### Exemple — Test Consumer (Vente Textile)
-
-```typescript
-// packages/frontend/src/api/__tests__/vente-textile.pact.ts
-import { PactV4, MatchersV3 } from '@pact-foundation/pact';
-import { venteTextileApi } from '../vente-textile.api';
-
-const { like, integer, uuid, iso8601DateTimeWithMillis } = MatchersV3;
-
-const provider = new PactV4({
-  consumer: 'SikaBox-Frontend',
-  provider: 'SikaBox-API',
-});
-
-describe('API Vente Textile — Contract', () => {
-  it('créer une vente textile valide', async () => {
-    await provider
-      .addInteraction()
-      .given('la Gestionnaire est connectée')
-      .given('les Variables Globales sont à leur valeur par défaut')
-      .uponReceiving('une vente textile valide')
-      .withRequest('POST', '/rest/v1/transactions/vente-textile', (builder) => {
-        builder
-          .headers({ Authorization: like('Bearer jwt-token') })
-          .jsonBody({
-            prix_de_vente: integer(15000),
-            cout_achat: integer(10000),
-            designation: like('Guipure bleue brodée'),
-          });
-      })
-      .willRespondWith(201, (builder) => {
-        builder.jsonBody({
-          id: uuid(),
-          type: 'VENTE_TEXTILE',
-          montant: integer(15000),
-          cout_achat: integer(10000),
-          benefice_net: integer(5000),
-          designation: like('Guipure bleue brodée'),
-          corrigee: false,
-          synchronisee: false,
-          cree_le: iso8601DateTimeWithMillis(),
-          fenetre_expiration: iso8601DateTimeWithMillis(),
-          fenetre_active: true,
-          ventilation: [
-            {
-              id: uuid(),
-              caisse: 'STOCK',
-              montant: integer(10000),
-            },
-            {
-              id: uuid(),
-              caisse: 'SALAIRE',
-              montant: integer(2500),
-            },
-            {
-              id: uuid(),
-              caisse: 'REMBOURSEMENT',
-              montant: integer(1500),
-            },
-            {
-              id: uuid(),
-              caisse: 'RESERVE',
-              montant: integer(1000),
-            },
-          ],
-        });
-      })
-      .executeTest(async (mockServer) => {
-        const result = await venteTextileApi.creer(
-          { prix_de_vente: 15000, cout_achat: 10000, designation: 'Guipure bleue brodée' },
-          { baseUrl: mockServer.url }
-        );
-        expect(result.type).toBe('VENTE_TEXTILE');
-        expect(result.benefice_net).toBe(5000);
-        expect(result.ventilation).toHaveLength(4);
-      });
-  });
-
-  it('rejette une vente à perte', async () => {
-    await provider
-      .addInteraction()
-      .given('la Gestionnaire est connectée')
-      .uponReceiving('une vente textile à perte (PV < CA)')
-      .withRequest('POST', '/rest/v1/transactions/vente-textile', (builder) => {
-        builder
-          .headers({ Authorization: like('Bearer jwt-token') })
-          .jsonBody({
-            prix_de_vente: integer(8000),
-            cout_achat: integer(10000),
-            designation: like('Article test'),
-          });
-      })
-      .willRespondWith(422, (builder) => {
-        builder.jsonBody({
-          type: like('https://sikabox.app/erreurs/validation/vente-a-perte'),
-          title: like('Vente à perte non autorisée'),
-          status: 422,
-          detail: like('Le Prix de Vente est inférieur au Coût d\'Achat.'),
-          extensions: {
-            code: 'VENTE_A_PERTE',
-          },
-        });
-      })
-      .executeTest(async (mockServer) => {
-        await expect(
-          venteTextileApi.creer(
-            { prix_de_vente: 8000, cout_achat: 10000, designation: 'Article test' },
-            { baseUrl: mockServer.url }
-          )
-        ).rejects.toThrow();
-      });
-  });
-});
-```
-
-### Script CI
-
-```json
-{
-  "scripts": {
-    "test:contract": "vitest run --config vitest.pact.config.ts",
-    "test:contract:publish": "pact-broker publish pacts/ --consumer-app-version $(git rev-parse --short HEAD)"
-  }
-}
-```
-
-### Intégration dans le Pipeline CI
-
-```yaml
-# .github/workflows/ci.yml (extrait)
-contract-tests:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: pnpm/action-setup@v4
-    - run: pnpm install --frozen-lockfile
-    - run: pnpm --filter frontend test:contract
-    - uses: actions/upload-artifact@v4
-      with:
-        name: pact-files
-        path: packages/frontend/pacts/
-```
+> ⚠️ **Décision rétrospective (mars 2026)** : Pact a été retiré de la stack de test suite à la recommandation REC-04 de la contre-expertise.
+>
+> **Justification** : Pact est conçu pour les équipes avec des APIs maintenues par des équipes séparées. Pour un développeur solo qui contrôle le frontend ET le backend (Supabase), Pact est surdimensionné. La conformité contractuelle est déjà assurée par :
+>
+> | Outil | Rôle |
+> |-------|------|
+> | **Prism** (section 1) | Mock server qui valide les réponses contre `openapi.yaml` |
+> | **MSW** | Mock au niveau réseau pour les tests unitaires React (TanStack Query) |
+> | **Playwright** | Tests E2E contre Supabase local (`supabase start`) |
+>
+> Les tâches liées à Pact dans les roadmaps sont supprimées. Le pipeline CI ne contient pas d'étape `test:contract`.
+>
+> **Référence** : `retrospective/02_RECOMMANDATIONS.md`, REC-04.
 
 ---
 

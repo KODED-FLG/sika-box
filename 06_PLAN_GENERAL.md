@@ -1,7 +1,7 @@
 # 06 — Plan Général (Master Plan)
 
 > Rôle : Technical PM & Scrum Master  
-> Sources : `04_ROADMAP_BACKEND.md` (103 tâches) · `05_ROADMAP_FRONTEND.md` (139 tâches) · `openapi.yaml` v1.1  
+> Sources : `04_ROADMAP_BACKEND.md` (103 tâches) · `05_ROADMAP_FRONTEND.md` (139 tâches) · `openapi.yaml` v1.0  
 > Total : **242 tâches** · Exécution par IA assistée
 
 ---

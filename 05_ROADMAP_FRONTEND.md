@@ -1,7 +1,7 @@
 # 05 — Roadmap Frontend
 
 > Rôle : Technical PM & Scrum Master  
-> Sources : `00_BIBLE_PROJET.md` v1.1 · `01_ARCHITECTURE_TECHNIQUE.md` · `02_NORMES_OPERATIONNELLES.md` · `openapi.yaml` v1.0 · `03_MOCKING_ET_CONTRACT_TESTING.md`  
+> Sources : `00_BIBLE_PROJET.md` v1.2 · `01_ARCHITECTURE_TECHNIQUE.md` · `02_NORMES_OPERATIONNELLES.md` · `openapi.yaml` v1.0 · `03_MOCKING_ET_CONTRACT_TESTING.md`  
 > Règle : chaque tâche ≤ 2h · TDD obligatoire · format **ID | Titre | Dépendance | Critère de fin**  
 > **Stratégie : le Frontend utilise le Mock Server Prism dès le jour 1. Il ne dépend PAS du backend réel.**
 
@@ -19,7 +19,7 @@
 
 ---
 
-## Phase F1 — Setup (Projet, Outillage, Mock Server)
+## Phase F1 — Setup (Projet, Outillage, Mock Server) `[V0.1]`
 
 > Objectif : PWA React opérationnelle avec mock API, prête pour le développement.
 
@@ -43,7 +43,7 @@
 
 ---
 
-## Phase F2 — Routing & Layout
+## Phase F2 — Routing & Layout `[V0.1]`
 
 > Objectif : toutes les pages accessibles via URL, garde d'authentification, layout responsive.
 
@@ -62,7 +62,7 @@
 
 ---
 
-## Phase F3 — Composants UI (Dumb / Présentationnels)
+## Phase F3 — Composants UI (Dumb / Présentationnels) `[V0.1]` `[V0.2]` `[V0.3]`
 
 > Objectif : tous les composants visuels construits et testés en isolation.  
 > Aucune dépendance API. Props uniquement. Storybook optionnel.
@@ -151,7 +151,7 @@
 
 ---
 
-## Phase F4 — Intégration API (Smart Components)
+## Phase F4 — Intégration API (Smart Components) `[V0.1]` `[V0.2]` `[V0.3]`
 
 > Objectif : connecter les composants dumb à l'API (Prism en dev, Supabase en prod).  
 > TanStack Query pour les requêtes, Zustand pour l'état global.
@@ -219,13 +219,13 @@
 | F4.42 | 🔌 Implémenter `useLogin` + `useLogout` + `useRefreshToken` | F4.41 | Test F4.41 passe au VERT. `useAuthStore` mis à jour. Redirect vers `/dashboard` après login. Refresh token automatique via intercepteur. |
 | F4.43 | 🔌 Implémenter Page Login (smart) | F4.42, F3.30 | Login → si mot de passe temporaire → page changement de mot de passe (F3.45) → dashboard. Mauvais identifiants → message d'erreur. Compte désactivé → message spécifique. |
 | F4.44 | 🔌 Implémenter Page Changement Mot de Passe (première connexion) | F4.22, F3.45 | FormulaireChangementMotDePasse. Après succès → redirect dashboard. Affichée automatiquement si le serveur indique un mot de passe temporaire. |
-| F4.45 | 🔌 Implémenter le verrouillage automatique par inactivité | F4.42, F5.8 | Après `verrouillage_inactivite` minutes (Variable Globale, défaut 5 min) sans interaction → redirect vers `/login`. Timer réinitialisé à chaque touch/click/keypress. |
+| F4.45 | 🔌 Implémenter le verrouillage automatique par inactivité | F4.42, F5.8 | Après `verrouillage_inactivite_minutes` minutes (Variable Globale, défaut 5 min) sans interaction → redirect vers `/login`. Timer réinitialisé à chaque touch/click/keypress. |
 
 **Total Phase F4 : 45 tâches**
 
 ---
 
-## Phase F5 — Gestion d'État & Mode Offline (PWA)
+## Phase F5 — Gestion d'État & Mode Offline (PWA) `[V1.0]`
 
 > Objectif : l'app fonctionne complètement sans connexion internet.  
 > Les transactions sont stockées en IndexedDB et synchronisées quand la connexion revient.
@@ -280,7 +280,7 @@
 
 ---
 
-## Phase F6 — Tests End-to-End Frontend (Playwright)
+## Phase F6 — Tests End-to-End Frontend (Playwright) `[V0.1]` `[V0.2]` `[V0.3]` `[V1.0]`
 
 > Objectif : valider les parcours utilisateurs complets sur le frontend (avec Prism ou Supabase local).
 

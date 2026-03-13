@@ -207,11 +207,12 @@ export function validerEtCalculerVente(
 | Règle | Description |
 |-------|-------------|
 | **Pas de `any`** | TypeScript `strict: true` dans tous les `tsconfig.json`. Le type `any` est interdit (ESLint rule `@typescript-eslint/no-explicit-any: error`). |
-| **Pas de nombres flottants pour FCFA** | Tout montant financier est un `number` entier (JavaScript n'a pas d'`int`, mais on utilise `Math.floor()` systématiquement et des assertions). |
+| **Pas de nombres flottants pour FCFA** | Tout montant financier est un `number` entier (JavaScript n'a pas d'`int`, mais on utilise `Math.floor()` systématiquement et des assertions). L'algorithme de répartition utilise la **méthode du plus grand reste** (Largest Remainder Method) pour distribuer le bénéfice sans perte : `Math.floor()` sur chaque part, puis distribution du reste aux caisses avec les plus gros restes fractionnaires (voir Bible §4.2 E5). |
 | **Fonctions pures dans `@sikabox/core`** | Aucun import de `dexie`, `@supabase/supabase-js`, `react`, ou tout module avec effet de bord. Zéro `fetch`, `console.log`, `Date.now()` — les dépendances temporelles sont injectées. |
 | **Pas de `DELETE` SQL** | Aucune opération `DELETE` dans le code applicatif. Les données financières sont immutables (append-only). |
 | **Pas de valeurs magiques** | Tous les seuils (10 minutes, ratios par défaut, plafond) sont définis dans `@sikabox/core/src/constants.ts` ou lus depuis les Variables Globales. |
 | **Nommage en français pour le domaine** | Les termes du Dictionnaire du Domaine (Bible §3) sont utilisés dans le code : `caisseSalaire`, `beneficeNet`, `plafondCapital`, `fenêtreCorrection`. Les termes techniques (framework, infra) restent en anglais : `repository`, `sync`, `middleware`. |
+| **Convention colonnes SQL** | Les tables du schéma `public` (contrôlées par les migrations Sika Box) utilisent le **français** pour les noms de colonnes (`cree_le`, `modifie_le`, `corrigee`, `benefice_net`). Les tables du schéma `auth` (gérées par Supabase GoTrue) restent en **anglais** (`created_at`, `email`). Pas de mapping entre les deux conventions — ce sont des schémas distincts. |
 
 ---
 

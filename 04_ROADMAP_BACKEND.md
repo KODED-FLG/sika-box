@@ -1,7 +1,7 @@
 # 04 — Roadmap Backend
 
 > Rôle : Technical PM & Scrum Master  
-> Sources : `00_BIBLE_PROJET.md` v1.1 · `01_ARCHITECTURE_TECHNIQUE.md` · `02_NORMES_OPERATIONNELLES.md` · `openapi.yaml` v1.0  
+> Sources : `00_BIBLE_PROJET.md` v1.2 · `01_ARCHITECTURE_TECHNIQUE.md` · `02_NORMES_OPERATIONNELLES.md` · `openapi.yaml` v1.0  
 > Règle : chaque tâche ≤ 2h · TDD obligatoire · format **ID | Titre | Dépendance | Critère de fin**
 
 ---
@@ -18,7 +18,7 @@
 
 ---
 
-## Phase B1 — Setup (Repo, Linter, CI)
+## Phase B1 — Setup (Repo, Linter, CI) `[V0.1]`
 
 > Objectif : monorepo opérationnel, CI verte, Supabase local fonctionnel.
 
@@ -27,7 +27,7 @@
 | B1.1 | ⚙️ Initialiser le monorepo Turborepo + pnpm workspaces | — | `pnpm install` passe, `turbo build` vide sans erreur. Structure : `packages/core`, `packages/frontend`, `packages/supabase`. |
 | B1.2 | ⚙️ Configurer `@sikabox/core` (TypeScript strict) | B1.1 | `packages/core/tsconfig.json` avec `strict: true`, `noUncheckedIndexedAccess: true`. `pnpm --filter core build` compile un fichier vide sans erreur. |
 | B1.3 | ⚙️ Configurer `packages/supabase` (CLI + config) | B1.1 | `supabase init` exécuté, `supabase/config.toml` présent. `supabase start` démarre les containers Docker (PostgreSQL, GoTrue, PostgREST). |
-| B1.4 | ⚙️ Configurer ESLint + Prettier (racine monorepo) | B1.1 | `.eslintrc.cjs` + `.prettierrc` à la racine. `pnpm lint` passe sur tous les packages. Config partagée via `eslint-config-custom`. |
+| B1.4 | ⚙️ Configurer ESLint + Prettier (racine monorepo) | B1.1 | `eslint.config.js` (flat config ESLint 9+) + `.prettierrc` à la racine. `pnpm lint` passe sur tous les packages. Config partagée via un fichier de config flat exporté. |
 | B1.5 | ⚙️ Configurer Vitest (racine + core) | B1.2 | `vitest.config.ts` dans `packages/core`. `pnpm --filter core test` exécute 0 tests, exit 0. Coverage configuré (Istanbul, seuil 80%). |
 | B1.6 | ⚙️ Configurer GitHub Actions CI | B1.4, B1.5 | `.github/workflows/ci.yml` : checkout → install → lint → typecheck → test → build. Push sur `develop` déclenche le pipeline. |
 | B1.7 | ⚙️ Configurer Husky + commitlint + lint-staged | B1.4 | `npx husky install` fonctionnel, `git commit -m "bad"` rejeté, `git commit -m "feat(core): init"` accepté. |
@@ -36,7 +36,7 @@
 
 ---
 
-## Phase B2 — BDD (Migrations PostgreSQL)
+## Phase B2 — BDD (Migrations PostgreSQL) `[V0.1]` `[V0.2]`
 
 > Objectif : schéma complet, RLS activé, données initiales seedées.  
 > Chaque migration est un fichier SQL dans `supabase/migrations/`.
@@ -48,7 +48,7 @@
 | B2.1 | 📦 Migration : créer les types ENUM | B1.3 | Enums créés : `role_utilisateur`, `type_transaction`, `type_caisse`, `statut_caisse`, `action_audit`. `supabase db reset` passe. |
 | B2.2 | 📦 Migration : créer la table `utilisateurs` | B2.1 | Table `utilisateurs` (id UUID PK, identifiant, role, actif, cree_le). Index sur `identifiant`. `supabase db reset` passe. |
 | B2.3 | 📦 Migration : créer la table `variables_globales` | B2.1 | Table `variables_globales` (id, cle UNIQUE, valeur INTEGER, modifie_le, modifie_par FK). Contrainte CHECK `valeur >= 0`. |
-| B2.4 | 📦 Seed : insérer les Variables Globales par défaut | B2.3 | `supabase/seed.sql` insère les 8 clés : `plafond_capital=500000`, `ratio_salaire=50`, `ratio_remboursement=30`, `ratio_reserve=20`, `ratio_post_plafond_salaire=70`, `ratio_post_plafond_reserve=30`, `frequence_rappel_commission=3`, `verrouillage_inactivite=5`. |
+| B2.4 | 📦 Seed : insérer les Variables Globales par défaut `[V0.1]` | B2.3 | `supabase/seed.sql` insère les 8 clés : `plafond_capital=500000`, `ratio_salaire=50`, `ratio_remboursement=30`, `ratio_reserve=20`, `ratio_post_plafond_salaire=70`, `ratio_post_plafond_reserve=30`, `frequence_rappel_commission_jours=3`, `verrouillage_inactivite_minutes=5`. |
 | B2.5 | 📦 Migration : créer la table `operateurs_momo` | B2.1 | Table `operateurs_momo` (id, nom, solde_initial INTEGER, solde_courant INTEGER, actif BOOLEAN). Contrainte CHECK `solde_initial >= 0`. |
 | B2.6 | 📦 Seed : insérer les 3 Opérateurs MoMo | B2.5 | Seed 3 lignes : MTN Mobile Money, Moov Money, Celtis Cash. `solde_initial = solde_courant = 0` (sera configuré par l'Admin). |
 | B2.7 | 📦 Migration : créer la table `transactions` | B2.2, B2.5 | Table `transactions` (id, type, designation, montant, cout_achat, benefice_net, operateur_momo_id FK, cree_par FK, cree_le, corrigee, corrigee_le, valeurs_avant_correction JSONB, fenetre_expiration TIMESTAMPTZ, synchronisee). Index sur `cree_par`, `type`, `cree_le`. |
@@ -80,14 +80,14 @@
 | B2.23 | 📦 Fonction SQL : `journaliser_modification_variable()` | B2.3, B2.9 | Trigger AFTER UPDATE sur `variables_globales` → INSERT dans `journal_audit` avec OLD et NEW values. |
 | B2.24 | 📦 Migration : seed utilisateur Admin initial | B2.2 | Seed un utilisateur Admin (via GoTrue API ou SQL direct) pour les tests manuels. Documenté dans README. |
 | B2.25 | 📦 Fonction SQL : `tableau_de_bord()` | B2.10, B2.5 | Fonction PL/pgSQL qui retourne le schéma complet `TableauDeBord` : soldes des 4 caisses (avec statut/couleur), fonds de roulement par opérateur MoMo, progression remboursement (pourcentage, plafond_atteint), total_libre (= solde Caisse Salaire), rappels_commission_en_attente. Test : la fonction retourne un JSON conforme au schéma `TableauDeBord` de l'OpenAPI. |
-| B2.26 | 📦 Fonction SQL : `verifier_rappel_commission()` | B2.5, B2.7, B2.3 | Fonction PL/pgSQL qui retourne un tableau de `RappelCommission` : pour chaque opérateur MoMo, vérifie si la dernière saisie de commission dépasse `frequence_rappel_commission` (Variable Globale, défaut 3 jours). Retourne `rappel_du: true/false`, `derniere_saisie`, `jours_depuis_derniere_saisie`. |
+| B2.26 | 📦 Fonction SQL : `verifier_rappel_commission()` | B2.5, B2.7, B2.3 | Fonction PL/pgSQL qui retourne un tableau de `RappelCommission` : pour chaque opérateur MoMo, vérifie si la dernière saisie de commission dépasse `frequence_rappel_commission_jours` (Variable Globale, défaut 3 jours). Retourne `rappel_du: true/false`, `derniere_saisie`, `jours_depuis_derniere_saisie`. |
 | B2.27 | 📦 Migration : RLS `operateurs_momo` UPDATE par ADMIN | B2.17 | Politique RLS complémentaire : permettre à l'ADMIN de PATCH (UPDATE) `solde_initial` et `actif` sur `operateurs_momo`. Ajouter un trigger de journalisation dans `journal_audit`. |
 
 **Total Phase B2 : 27 tâches**
 
 ---
 
-## Phase B3 — Tests TDD (`@sikabox/core`)
+## Phase B3 — Tests TDD (`@sikabox/core`) `[V0.1]` `[V0.2]` `[V0.3]`
 
 > Objectif : écrire **tous les tests d'abord**, 0 test ne passe (phase Rouge du TDD).  
 > Les tests définissent le contrat comportemental du module `@sikabox/core`.
@@ -108,7 +108,7 @@
 | B3.5 | 🧪 Test : répartition quand Plafond de Capital atteint | B3.2 | Plafond=500000, déjà remboursé=500000. Ratios post-plafond (70/30) → Salaire=70%, Réserve=30%, Remboursement=0. **Test ROUGE.** |
 | B3.6 | 🧪 Test : répartition Plafond partiellement atteint (ce bénéfice dépasse le plafond) | B3.2 | Remboursé=499000, plafond=500000, bénéfice=5000 → Remboursement reçoit 1000 (complète à 500000), reste 4000 réparti en post-plafond (70/30). **Test ROUGE.** |
 | B3.7 | 🧪 Test : répartition montant non divisible (arrondi) | B3.2 | Bénéfice=1 → vérifier que la somme des caisses = 1 (pas de perte/gain d'arrondi). **Test ROUGE.** |
-| B3.8 | 🧪 Test : répartition bénéfice=3 avec ratios 50/30/20 (arrondi critique) | B3.2 | 3×50%=1.5→2, 3×30%=0.9→1, 3×20%=0.6→0. Somme=3. Vérifier l'algo de répartition du reste. **Test ROUGE.** |
+| B3.8 | 🧪 Test : répartition bénéfice=3 avec ratios 50/30/20 (arrondi critique) `[V0.1]` | B3.2 | Algorithme Largest Remainder Method : `floor(3×50%)=1` (reste 0.5), `floor(3×30%)=0` (reste 0.9), `floor(3×20%)=0` (reste 0.6). Somme floors=1, reste=2. Distribution : +1 Remboursement (reste 0.9), +1 Réserve (reste 0.6). **Résultat attendu : Salaire=1, Remboursement=1, Réserve=1. Somme=3.** Vérifier l'algo de répartition du reste. **Test ROUGE.** |
 
 ### B3.C — Validation Vente Textile
 
@@ -156,7 +156,7 @@
 
 ---
 
-## Phase B4 — Logique Métier (`@sikabox/core` — Implémentation)
+## Phase B4 — Logique Métier (`@sikabox/core` — Implémentation) `[V0.1]` `[V0.2]` `[V0.3]`
 
 > Objectif : faire passer tous les tests écrits en B3 (phase Verte du TDD).
 
@@ -174,7 +174,7 @@
 |---|---|---|---|
 | B4.4 | 🏗️ Implémenter `calculerRepartition()` — cas nominal | B3.3, B4.2 | Tests B3.3, B3.4 passent au VERT. Fonction pure : `(beneficeNet, ratios) → MouvementCaisse[]`. |
 | B4.5 | 🏗️ Implémenter `calculerRepartition()` — plafond atteint | B3.5, B3.6, B4.4 | Tests B3.5, B3.6 passent au VERT. Gère la bascule vers les ratios post-plafond. |
-| B4.6 | 🏗️ Implémenter `calculerRepartition()` — arrondi entier | B3.7, B3.8, B4.4 | Tests B3.7, B3.8 passent au VERT. Algorithme : "largest remainder method" pour distribuer sans perte. |
+| B4.6 | 🏗️ Implémenter `calculerRepartition()` — arrondi entier `[V0.1]` | B3.7, B3.8, B4.4 | Tests B3.7, B3.8 passent au VERT. Algorithme : **Largest Remainder Method** — `Math.floor()` chaque part, puis distribuer le reste (1 FCFA à la fois) aux caisses avec les plus gros restes fractionnaires. En cas d'égalité, Caisse Réserve prioritaire. |
 
 ### B4.C — Validations
 
@@ -208,7 +208,7 @@
 
 ---
 
-## Phase B5 — Edge Functions (Endpoints Supabase)
+## Phase B5 — Edge Functions (Endpoints Supabase) `[V0.1]` `[V0.2]` `[V0.3]` `[V1.0]`
 
 > Objectif : implémenter les endpoints qui NE sont PAS auto-gérés par PostgREST.  
 > PostgREST gère automatiquement le CRUD sur les tables avec RLS.  
@@ -218,7 +218,7 @@
 
 | ID | Titre | Dépendance | Critère de fin |
 |---|---|---|---|
-| B5.1 | ⚙️ Configurer l'import de `@sikabox/core` dans les Edge Functions | B4.14, B1.3 | `import { calculerRepartition } from '@sikabox/core'` fonctionne dans une Edge Function Deno. Import map configuré. |
+| B5.1 | ⚙️ Configurer l'import de `@sikabox/core` dans les Edge Functions `[V0.1]` | B4.14, B1.3 | `import { calculerRepartition } from '@sikabox/core'` fonctionne dans une Edge Function Deno. Import map configuré. Le build de `@sikabox/core` produit un ESM bundle compatible Deno (pas de dépendances Node-only, pas de CommonJS). Vérifier avec `deno run --check`. |
 | B5.2 | ⚙️ Créer le middleware d'authentification Edge Function | B5.1 | Helper `getAuthUser(req)` qui extrait et vérifie le JWT, retourne `{id, role}`. Retourne 401 si invalide. |
 | B5.3 | ⚙️ Créer le helper de réponse RFC 7807 | B5.1 | Helper `problemResponse(status, code, title, detail, extensions?)` pour formater les erreurs. |
 
@@ -270,7 +270,7 @@
 
 ---
 
-## Phase B6 — Tests d'intégration End-to-End Backend
+## Phase B6 — Tests d'intégration End-to-End Backend `[V0.1]` `[V0.2]` `[V0.3]`
 
 > Objectif : valider les flux complets sur Supabase local.
 

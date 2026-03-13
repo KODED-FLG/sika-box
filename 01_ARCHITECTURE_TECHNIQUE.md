@@ -71,7 +71,7 @@ C4Context
     Rel(pwa, supabase_auth, "S'authentifie", "HTTPS / JWT")
     Rel(pwa, supabase_db, "Synchronise les données", "HTTPS / REST API")
     Rel(pwa, edge_functions, "Déclenche la validation", "HTTPS")
-    Rel(edge_functions, supabase_db, "Valide et écrit", "SQL / Prisma")
+    Rel(edge_functions, supabase_db, "Valide et écrit", "Supabase Client / PostgREST")
     Rel(edge_functions, core_lib, "Importe", "ES Module")
     Rel(pwa, core_lib, "Importe", "ES Module (bundled)")
 ```
@@ -206,7 +206,7 @@ erDiagram
 
     VARIABLE_GLOBALE {
         uuid id PK
-        string cle UK "plafond_capital | ratio_salaire | ratio_remboursement | ratio_reserve | ratio_post_plafond_salaire | ratio_post_plafond_reserve | frequence_rappel_commission | verrouillage_inactivite"
+        string cle UK "plafond_capital | ratio_salaire | ratio_remboursement | ratio_reserve | ratio_post_plafond_salaire | ratio_post_plafond_reserve | frequence_rappel_commission_jours | verrouillage_inactivite_minutes"
         integer valeur
         timestamp modifie_le
         uuid modifie_par FK
@@ -224,10 +224,9 @@ erDiagram
         uuid id PK
         enum type "VENTE_TEXTILE | MOMO_DEPOT | MOMO_RETRAIT | COMMISSION_MOMO"
         string designation "nullable, texte libre"
-        integer montant "PV pour vente, montant pour MoMo"
+        integer montant "voir tableau de mapping ci-dessous"
         integer cout_achat "nullable, CA pour vente textile"
-        integer commission "nullable, pour commission MoMo"
-        integer benefice_net "calculé"
+        integer benefice_net "calculé, voir tableau de mapping"
         uuid operateur_momo_id FK "nullable"
         uuid cree_par FK
         timestamp cree_le
@@ -250,7 +249,7 @@ erDiagram
     JOURNAL_AUDIT {
         uuid id PK
         uuid utilisateur_id FK
-        string action "MODIFICATION_VARIABLE | CREATION_COMPTE | DESACTIVATION_COMPTE | CORRECTION_TRANSACTION"
+        string action "MODIFICATION_VARIABLE | CREATION_COMPTE | DESACTIVATION_COMPTE | ACTIVATION_COMPTE | CORRECTION_TRANSACTION"
         jsonb details "ancienne_valeur, nouvelle_valeur, etc."
         timestamp cree_le
     }
@@ -262,6 +261,25 @@ erDiagram
     OPERATEUR_MOMO ||--o{ TRANSACTION : "concerne"
     OPERATEUR_MOMO ||--o{ MOUVEMENT_CAISSE : "affecte"
 ```
+
+#### Mapping du champ `montant` selon le type de transaction
+
+> **Convention** : Le champ `montant` de la table `TRANSACTION` a une signification différente selon le type de transaction. Ce tableau est la référence unique pour éviter toute ambiguïté.
+
+| Type de transaction | `montant` représente | `cout_achat` | `benefice_net` |
+|---------------------|---------------------|--------------|----------------|
+| `VENTE_TEXTILE` | Prix de Vente (PV) | Coût d'Achat (CA) | PV − CA |
+| `MOMO_DEPOT` | Montant du dépôt | `NULL` | `0` |
+| `MOMO_RETRAIT` | Montant du retrait | `NULL` | `0` |
+| `COMMISSION_MOMO` | Montant de la commission | `NULL` | = `montant` (la commission entière est le bénéfice) |
+
+#### Asymétrie architecturale : solde stocké (MoMo) vs solde calculé (caisses)
+
+> **Justification documentée** : Les soldes des **4 caisses** (Stock, Salaire, Remboursement, Réserve) sont **calculés** par agrégation des mouvements de caisse (`SUM(montant) FROM mouvements_caisse GROUP BY caisse`) via la vue `soldes_caisses`. Il n'y a pas de champ `solde` stocké dans une table — le solde est toujours dérivé des mouvements.
+>
+> En revanche, le **Fonds de Roulement MoMo** par opérateur utilise un champ `solde_courant` **stocké** dans la table `operateurs_momo`, mis à jour par un trigger (`mettre_a_jour_solde_momo`, tâche B2.22). Ce choix est motivé par la **performance de la vérification pré-dépôt** : avant chaque dépôt MoMo, le système doit vérifier que le fonds est suffisant. Agréger les mouvements à chaque opération serait coûteux.
+>
+> **Invariant de réconciliation** : `solde_courant = solde_initial + SUM(montant FROM mouvements_caisse WHERE caisse = 'FONDS_ROULEMENT_MOMO' AND operateur_momo_id = ?)`. Un test E2E (à ajouter en B6) doit vérifier cet invariant après une série d'opérations.
 
 ### 2.4 Infrastructure
 
@@ -443,4 +461,4 @@ CREATE POLICY "gestionnaire_correct_own_transaction"
 
 ---
 
-*Ce document d'architecture est aligné avec la Bible du Projet (00_BIBLE_PROJET.md v1.1). Toute déviation lors de l'implémentation doit être documentée dans un nouvel ADR et validée par le Product Owner.*
+*Ce document d'architecture est aligné avec la Bible du Projet (00_BIBLE_PROJET.md v1.2). Toute déviation lors de l'implémentation doit être documentée dans un nouvel ADR et validée par le Product Owner.*

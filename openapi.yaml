@@ -675,7 +675,7 @@ paths:
       summary: Vérifier si un Rappel de Commission est dû
       description: |
         Vérifie pour chaque Opérateur MoMo si la dernière saisie de commission
-        dépasse la fréquence configurée (Variable Globale `frequence_rappel_commission`).
+        dépasse la fréquence configurée (Variable Globale `frequence_rappel_commission_jours`).
         Retourne la liste des Opérateurs concernés.
         **Accessible par la GESTIONNAIRE.**
       responses:
@@ -1209,14 +1209,14 @@ components:
         - ratio_reserve
         - ratio_post_plafond_salaire
         - ratio_post_plafond_reserve
-        - frequence_rappel_commission
-        - verrouillage_inactivite
+        - frequence_rappel_commission_jours
+        - verrouillage_inactivite_minutes
       description: |
         Clé d'une Variable Globale Configurable.
         Les ratios sont en pourcentages entiers (ex: 50 pour 50%).
         Le plafond est en FCFA.
-        La fréquence de rappel est en jours.
-        Le verrouillage est en minutes.
+        `frequence_rappel_commission_jours` : nombre de jours entre deux rappels.
+        `verrouillage_inactivite_minutes` : durée d'inactivité avant verrouillage automatique.
 
     ActionAudit:
       type: string
@@ -1703,7 +1703,10 @@ components:
         email:
           type: string
           format: email
-          description: Identifiant de connexion.
+          description: |
+            Identifiant de connexion (format email imposé par Supabase GoTrue).
+            Il ne s'agit pas nécessairement d'une vraie adresse email —
+            c'est un identifiant technique au format email (ex: gestionnaire@sikabox.app).
           example: gestionnaire@sikabox.app
         password:
           type: string

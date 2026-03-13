@@ -197,7 +197,10 @@ Aucune application grand public de gestion financière ne propose ce niveau de s
 > **Rappel** : La V1 n'est pas un prototype. Chaque fonctionnalité listée ci-dessous doit être **implémentée de manière robuste, sécurisée et définitive**.
 
 #### E1 — Authentification & Gestion des accès
-- Connexion par identifiant + mot de passe (hashé, salé).
+- Connexion par identifiant (format email) + mot de passe (hashé, salé).
+
+  > ⚠️ **Précision technique** : Supabase GoTrue impose un format email comme identifiant. L'identifiant de la Gestionnaire sera de la forme `gestionnaire@sikabox.app` (ou équivalent). Cela ne nécessite PAS une vraie boîte email — c'est un identifiant technique au format email.
+
 - Deux rôles : `ADMIN` et `GESTIONNAIRE`, appliqués côté client et côté serveur.
 - **Appareils séparés** : l'Admin et la Gestionnaire utilisent chacun leur propre smartphone. Pas de mécanisme de basculement de session sur un même appareil.
 - Protection de toutes les routes et actions par vérification de rôle.
@@ -249,7 +252,12 @@ Aucune application grand public de gestion financière ne propose ce niveau de s
 - Détection automatique de l'atteinte du Plafond de Capital.
 - Gestion de la transaction « charnière » : si un bénéfice fait dépasser le Plafond, seul le montant manquant va en Caisse Remboursement, le surplus est redistribué selon les Ratios post-Plafond.
 - Activation du mécanisme de Redistribution post-Plafond : bascule vers les **Ratios post-Plafond fixes** (par défaut 70 % Salaire / 30 % Réserve). Pas de recalcul proportionnel.
-- Tous les calculs en nombres entiers (FCFA, pas de centimes) — arrondi au franc inférieur, le reste va en Caisse Réserve.
+- Tous les calculs en nombres entiers (FCFA, pas de centimes). L'algorithme de répartition utilise la **méthode du plus grand reste** (Largest Remainder Method) :
+  1. Calculer la part brute de chaque caisse : `bénéfice × ratio / 100`.
+  2. Prendre le `Math.floor()` de chaque part.
+  3. Calculer le reste total : `bénéfice - somme(floors)`.
+  4. Distribuer le reste (1 FCFA à la fois) aux caisses ayant les plus gros restes fractionnaires.
+  5. En cas d'égalité de restes, la **Caisse Réserve** est prioritaire.
 
 #### E11 — Correction de Transaction
 - Fenêtre de correction de **10 minutes** après la saisie d'une transaction.
@@ -338,7 +346,7 @@ Aucune application grand public de gestion financière ne propose ce niveau de s
 | Q8 | Devise unique FCFA ? | **Confirmé.** FCFA (XOF) uniquement. Pas de multi-devises. |
 | Q9 | Fréquence par défaut du Rappel de Commission ? | **3 jours.** Valeur par défaut : la Gestionnaire est rappelée toutes les 72 heures depuis la dernière saisie de commission. Configurable par l'Admin via les Variables Globales. |
 | Q10 | Vérification de dépôt MoMo (e-float suffisant) ? | **Oui, vérification obligatoire.** Le dépôt est refusé si le Fonds de Roulement MoMo de l'Opérateur est insuffisant (erreur `FONDS_INSUFFISANT`). Pas de solde négatif autorisé. |
-| Q11 | Durée du verrouillage automatique après inactivité ? | **5 minutes.** Après 5 minutes d'inactivité, l'app se verrouille et demande une reconnexion. Configurable par l'Admin via les Variables Globales (`verrouillage_inactivite`). |
+| Q11 | Durée du verrouillage automatique après inactivité ? | **5 minutes.** Après 5 minutes d'inactivité, l'app se verrouille et demande une reconnexion. Configurable par l'Admin via les Variables Globales (`verrouillage_inactivite_minutes`). |
 
 ### 5.2 Toutes les questions résolues
 
