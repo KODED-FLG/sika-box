@@ -1,0 +1,14 @@
+{
+  "name": "@sikabox/supabase",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'No build step for supabase package'",
+    "lint": "echo 'No lint step for supabase package'",
+    "db:reset": "supabase db reset",
+    "db:diff": "supabase db diff",
+    "start": "supabase start",
+    "stop": "supabase stop",
+    "functions:serve": "supabase functions serve"
+  }
+}
