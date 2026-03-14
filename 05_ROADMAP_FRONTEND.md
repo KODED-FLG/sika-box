@@ -163,7 +163,7 @@
 | F4.1 | 🧪 Créer le test d'abord : `apiClient` (fetch wrapper) | F1.5, F1.10 | Test (MSW) : `apiClient.get('/caisses/soldes')` → ajoute automatiquement `Authorization: Bearer ...` et `Content-Type: application/json`. 401 → erreur `SESSION_EXPIREE`. **Test ROUGE.** |
 | F4.2 | 🔌 Implémenter `apiClient` | F4.1 | Test F4.1 passe au VERT. Wrapper autour de `fetch`. Intercepte les 401 pour logout automatique. |
 | F4.3 | 🧪 Créer le test d'abord : hooks TanStack Query (`useTransactions`, `useSoldesCaisses`, etc.) | F4.2 | Test (MSW) : `renderHook(() => useSoldesCaisses())` → retourne `{ data, isLoading, error }`. Mock MSW répond avec données conformes OpenAPI. **Test ROUGE.** |
-| F4.4 | 🔌 Implémenter les hooks TanStack Query (lecture) | F4.3 | Tests F4.3 passent au VERT. Hooks : `useSoldesCaisses`, `useTransactions`, `useTransaction(id)`, `useOperateursMomo`, `useVariablesGlobales`, `useJournalAudit`, `useRappelCommission`. |
+| F4.4 | 🔌 Implémenter les hooks TanStack Query (lecture) | F4.3 | Tests F4.3 passent au VERT. Hooks : `useSoldesCaisses`, `useTransactions`, `useTransaction(id)`, `useOperateursMomo`, `useVariablesGlobales`, `useJournalAudit`, `useRappelCommission`, `useListeGestionnaires` (ADMIN). |
 
 ### F4.B — Mutations API
 
@@ -179,9 +179,9 @@
 | F4.12 | 🔌 Implémenter `useCorrigerTransaction` | F4.11 | Test F4.11 passe au VERT. |
 | F4.13 | 🧪 Créer le test d'abord : mutation `useModifierVariableGlobale` (ADMIN) | F4.2 | Test (MSW) : PATCH `/rest/v1/variables_globales/{cle}` → 200. **Test ROUGE.** |
 | F4.14 | 🔌 Implémenter `useModifierVariableGlobale` | F4.13 | Test F4.13 passe au VERT. |
-| F4.15 | 🧪 Créer le test d'abord : mutation `useCreerGestionnaire` (ADMIN) | F4.2 | Test (MSW) : POST `/rest/v1/utilisateurs` → 201. **Test ROUGE.** |
+| F4.15 | 🧪 Créer le test d'abord : mutation `useCreerGestionnaire` (ADMIN) | F4.2 | Test (MSW) : POST `/functions/v1/admin/gestionnaire` → 201. **Test ROUGE.** |
 | F4.16 | 🔌 Implémenter `useCreerGestionnaire` | F4.15 | Test F4.15 passe au VERT. |
-| F4.17 | 🧪 Créer le test d'abord : mutation `useModifierStatutGestionnaire` (ADMIN) | F4.2 | Test (MSW) : PATCH `/rest/v1/utilisateurs/{id}/statut` → 200. **Test ROUGE.** |
+| F4.17 | 🧪 Créer le test d'abord : mutation `useModifierStatutGestionnaire` (ADMIN) | F4.2 | Test (MSW) : POST `/functions/v1/admin/gestionnaire/{id}/statut` → 200. **Test ROUGE.** |
 | F4.18 | 🔌 Implémenter `useModifierStatutGestionnaire` | F4.17 | Test F4.17 passe au VERT. |
 | F4.19 | 🧪 Créer le test d'abord : mutation `useConfigurerOperateurMomo` (ADMIN) | F4.2 | Test (MSW) : PATCH `/rest/v1/operateurs_momo/{id}` → 200. **Test ROUGE.** |
 | F4.20 | 🔌 Implémenter `useConfigurerOperateurMomo` | F4.19 | Test F4.19 passe au VERT. |

@@ -1,8 +1,8 @@
 # 06 — Plan Général (Master Plan)
 
 > Rôle : Technical PM & Scrum Master  
-> Sources : `04_ROADMAP_BACKEND.md` (103 tâches) · `05_ROADMAP_FRONTEND.md` (139 tâches) · `openapi.yaml` v1.0  
-> Total : **242 tâches** · Exécution par IA assistée
+> Sources : `04_ROADMAP_BACKEND.md` (108 tâches) · `05_ROADMAP_FRONTEND.md` (139 tâches) · `openapi.yaml` v1.0  
+> Total : **247 tâches** · Exécution par IA assistée
 
 ---
 
@@ -12,7 +12,7 @@
                          MASTER PLAN — SIKA BOX V1
 ═══════════════════════════════════════════════════════════════════
 
-  BACKEND (103 tâches)                   FRONTEND (139 tâches)
+  BACKEND (108 tâches)                   FRONTEND (139 tâches)
   ──────────────────                     ────────────────────
   ┌─────────────┐                        ┌──────────────┐
   │  B1 Setup   │────────────────────────│   F1 Setup   │
@@ -21,7 +21,7 @@
          │                                      │
   ┌──────▼──────┐                        ┌──────▼───────┐
   │  B2 BDD     │                        │  F2 Routing  │
-  │ (27 tâches) │                        │  (8 tâches)  │
+  │ (28 tâches) │                        │  (8 tâches)  │
   └──────┬──────┘                        └──────┬───────┘
          │                                      │
   ┌──────▼──────┐                        ┌──────▼───────┐
@@ -36,7 +36,7 @@
          │                                      │
   ┌──────▼──────┐                               │
   │  B5 Endpts  │                               │
-  │ (22 tâches) │                               │
+  │ (26 tâches) │                               │
   └──────┬──────┘                               │
          │              ┌──────────────┐        │
          │              │ 🔗 SYNC PT 1 │        │
@@ -70,13 +70,13 @@
 | # | Jalon | Tâches | Critère de complétion | Dépend de |
 |---|---|---|---|---|
 | **M0** | 🏁 Monorepo opérationnel | B1.1–B1.7, F1.1 | `pnpm install && turbo build` passe. CI verte. Supabase local démarre. | — |
-| **M1** | 📦 BDD complète | B2.1–B2.27 | `supabase db reset` passe. Toutes les tables créées + RLS + triggers + fonctions SQL (tableau_de_bord, rappel_commission) + seed. | M0 |
+| **M1** | 📦 BDD complète | B2.1–B2.28 | `supabase db reset` passe. Toutes les tables créées + RLS + triggers + fonctions SQL (tableau_de_bord, rappel_commission) + vue transactions_enrichies + seed. | M0 |
 | **M2** | 🧪 Tests `@sikabox/core` écrits (ROUGE) | B3.1–B3.25 | 25 tests écrits, tous ROUGES. 0% passage. Contrat comportemental défini. | M0 |
 | **M3** | ✅ `@sikabox/core` fonctionnel (VERT) | B4.1–B4.14 | 25 tests VERTS. Coverage ≥ 90%. `pnpm --filter core test` passe. | M2 |
 | **M4** | 🎨 Frontend mockable | F1.1–F1.13, F2.1–F2.8 | PWA démarre, routes fonctionnelles (incl. admin/gestionnaire, admin/operateurs-momo, changer-mot-de-passe), Prism sert le mock. React Hook Form + Zod configurés. Login factice fonctionne. | M0 |
 | **M5** | 🧩 Composants UI complets | F3.1–F3.45 | 45 composants testés en isolation (incl. FormulaireCreationGestionnaire, ConfigOperateurMomoCard, AperçuBeneficeNet, Toast, SkeletonLoader, EmptyState, FormulaireChangementMotDePasse). 100% des composants dumb prêts. | M4 |
 | **M6** | 🔌 Frontend connecté (Mock) | F4.1–F4.45 | Toutes les pages connectées à Prism (incl. gestion gestionnaire, config opérateurs MoMo, changement MDP, verrouillage inactivité). Flux complets testables sur le mock. | M5, F1.6 |
-| **M7** | 🚀 Backend API opérationnel | B5.1–B5.22, B6.1–B6.8 | Edge Functions + RPC déployées (incl. configurer_operateur_momo). Tests E2E backend passent sur Supabase local. | M1, M3 |
+| **M7** | 🚀 Backend API opérationnel | B5.1–B5.26, B6.1–B6.8 | Edge Functions + RPC déployées (incl. configurer_operateur_momo, creer-gestionnaire, modifier-statut-gestionnaire). Tests E2E backend passent sur Supabase local. | M1, M3 |
 | **M8** | 🔗 **SYNC POINT 1** — Intégration Front ↔ Back | — | Frontend bascule de Prism vers Supabase local. Flux de bout en bout fonctionnel. | M6, M7 |
 | **M9** | 📱 Mode Offline complet | F5.1–F5.21 | IndexedDB, sync queue, auto-sync, Service Worker. Tests offline passent. | M8 |
 | **M10** | 🧪 **SYNC POINT 2** — Tests E2E Full Stack | F6.1–F6.7 | Playwright tests passent sur Supabase local. Y compris test offline. | M9 |
@@ -164,7 +164,7 @@ Semaine 10     │          🎉 V1 RELEASE — Déploiement Prod
 | Épic (Bible) | Tâches Backend | Tâches Frontend | Total |
 |---|---|---|---|
 | E1 — Authentification | B2.2, B2.12, B2.24 | F2.2–F2.5, F3.29–F3.30, F3.44–F3.45, F4.21–F4.22, F4.41–F4.45, F5.1–F5.2 | 20 |
-| E2 — Configuration Admin | B2.3–B2.4, B2.15, B2.23, B2.25–B2.27, B5.21–B5.22 | F3.21–F3.22, F3.33–F3.38, F4.13–F4.20, F4.31–F4.36 | 27 |
+| E2 — Configuration Admin | B2.3–B2.4, B2.15, B2.23, B2.25–B2.28, B5.21–B5.26 | F3.21–F3.22, F3.33–F3.38, F4.13–F4.20, F4.31–F4.36 | 32 |
 | E3 — Vente Textile | B2.7, B2.19–B2.20, B3.3–B3.13, B4.4–B4.7, B5.11–B5.12 | F3.9–F3.14, F3.31–F3.32, F3.39–F3.40, F4.5–F4.6, F4.25–F4.26 | 30 |
 | E4 — Opérations MoMo | B2.5–B2.6, B2.21–B2.22, B2.26, B3.14–B3.17, B4.8–B4.9, B5.13–B5.16 | F3.5–F3.8, F3.15–F3.18, F4.7–F4.10, F4.27–F4.28 | 27 |
 | E5 — Répartition Automatique | B3.3–B3.8, B4.4–B4.6 | F3.11–F3.12 | 10 |

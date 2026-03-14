@@ -25,6 +25,20 @@ info:
 
     ## Erreurs
     Toutes les réponses d'erreur suivent le standard **RFC 7807** (Problem Details).
+    ## Mapping des chemins Supabase
+    Les chemins de ce contrat décrivent l'API **logique**. L'implémentation Supabase
+    utilise les conventions suivantes :
+    - `/auth/v1/*` → **GoTrue** (authentification, tokens).
+    - `/rest/v1/{table}` → **PostgREST** (CRUD auto-généré sur les tables avec RLS).
+    - `/rest/v1/rpc/{fonction}` → **PostgREST RPC** (fonctions PL/pgSQL exposées automatiquement).
+    - `/functions/v1/{nom}` → **Edge Functions** (TypeScript/Deno, logique métier complexe, coordination GoTrue).
+
+    Les endpoints de type "création de transaction" (`/rest/v1/transactions/*`) sont implémentés
+    comme des **fonctions PL/pgSQL** (exposées via PostgREST RPC) ou des **Edge Functions**,
+    selon la complexité. Se référer au `04_ROADMAP_BACKEND.md` pour le mapping exact.
+
+    Les endpoints de gestion utilisateur (`/functions/v1/admin/*`) sont des **Edge Functions**
+    car ils coordonnent GoTrue (auth.users) et la table publique (utilisateurs).
   contact:
     name: Sika Box Dev Team
   license:
@@ -301,6 +315,28 @@ paths:
                 detail: La somme des Ratios de Répartition doit être égale à 100%.
 
   /rest/v1/utilisateurs:
+    get:
+      operationId: listerUtilisateurs
+      tags: [Administration]
+      summary: Lister les utilisateurs (gestionnaires)
+      description: |
+        Retourne la liste des utilisateurs enregistrés.
+        **ADMIN** : voit tous les utilisateurs.
+        **GESTIONNAIRE** : voit uniquement son propre profil (RLS).
+        Endpoint PostgREST auto-généré avec RLS.
+      responses:
+        '200':
+          description: Liste des utilisateurs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Utilisateur'
+        '401':
+          $ref: '#/components/responses/NonAuthentifie'
+
+  /functions/v1/admin/gestionnaire:
     post:
       operationId: creerCompteGestionnaire
       tags: [Administration]
@@ -308,6 +344,7 @@ paths:
       description: |
         Crée un nouveau compte Gestionnaire. **Réservé au rôle ADMIN.**
         Le mot de passe est temporaire et devra être changé à la première connexion.
+        **Edge Function** : coordonne GoTrue (création auth.users) et la table publique (utilisateurs).
       requestBody:
         required: true
         content:
@@ -335,14 +372,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
 
-  /rest/v1/utilisateurs/{id}/statut:
-    patch:
+  /functions/v1/admin/gestionnaire/{id}/statut:
+    post:
       operationId: modifierStatutGestionnaire
       tags: [Administration]
       summary: Activer ou désactiver un compte Gestionnaire
       description: |
         Active ou désactive le compte Gestionnaire. **Réservé au rôle ADMIN.**
         Un compte désactivé ne peut plus se connecter.
+        **Edge Function** : coordonne GoTrue (ban/unban auth.users) et la table publique (utilisateurs.actif).
       parameters:
         - name: id
           in: path

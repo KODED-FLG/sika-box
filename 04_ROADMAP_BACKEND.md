@@ -82,8 +82,9 @@
 | B2.25 | 📦 Fonction SQL : `tableau_de_bord()` | B2.10, B2.5 | Fonction PL/pgSQL qui retourne le schéma complet `TableauDeBord` : soldes des 4 caisses (avec statut/couleur), fonds de roulement par opérateur MoMo, progression remboursement (pourcentage, plafond_atteint), total_libre (= solde Caisse Salaire), rappels_commission_en_attente. Test : la fonction retourne un JSON conforme au schéma `TableauDeBord` de l'OpenAPI. |
 | B2.26 | 📦 Fonction SQL : `verifier_rappel_commission()` | B2.5, B2.7, B2.3 | Fonction PL/pgSQL qui retourne un tableau de `RappelCommission` : pour chaque opérateur MoMo, vérifie si la dernière saisie de commission dépasse `frequence_rappel_commission_jours` (Variable Globale, défaut 3 jours). Retourne `rappel_du: true/false`, `derniere_saisie`, `jours_depuis_derniere_saisie`. |
 | B2.27 | 📦 Migration : RLS `operateurs_momo` UPDATE par ADMIN | B2.17 | Politique RLS complémentaire : permettre à l'ADMIN de PATCH (UPDATE) `solde_initial` et `actif` sur `operateurs_momo`. Ajouter un trigger de journalisation dans `journal_audit`. |
+| B2.28 | 📦 Vue `transactions_enrichies` (champs calculés) | B2.7, B2.5 | Vue PostgreSQL qui expose les transactions avec les champs calculés : `fenetre_active` (= `NOW() < fenetre_expiration`), `operateur_momo_nom` (JOIN sur `operateurs_momo.nom`). Le endpoint `GET /rest/v1/transactions` utilise cette vue au lieu de la table directe. PostgREST sert les vues comme des tables. RLS héritée via `security_invoker = true`. |
 
-**Total Phase B2 : 27 tâches**
+**Total Phase B2 : 28 tâches**
 
 ---
 
@@ -266,7 +267,16 @@
 | B5.21 | 🧪 Créer le test d'abord : RPC `configurer_operateur_momo` (Admin) | B2.27 | Test : Admin PATCH MTN Mobile Money avec `solde_initial=200000` → `solde_courant` mis à jour si première config. Entrée dans `journal_audit`. GESTIONNAIRE → 403. **Test ROUGE.** |
 | B5.22 | 🚀 Implémenter fonction PostgreSQL `configurer_operateur_momo()` | B5.21 | Test B5.21 passe au VERT. Valide rôle ADMIN, met à jour `solde_initial` (et `solde_courant` si c'est la première config), journalise. |
 
-**Total Phase B5 : 22 tâches**
+### B5.G — Edge Functions : Gestion Utilisateur (GoTrue)
+
+| ID | Titre | Dépendance | Critère de fin |
+|---|---|---|---|
+| B5.23 | 🧪 Créer le test d'abord : Edge Function `creer-gestionnaire` | B5.2, B5.3 | Test d'intégration : POST `/functions/v1/admin/gestionnaire` avec `{identifiant, mot_de_passe_temporaire}` (rôle ADMIN) → 201. Vérifie : utilisateur créé dans GoTrue (auth.users) + ligne insérée dans `public.utilisateurs` avec role=GESTIONNAIRE. GESTIONNAIRE → 403. **Test ROUGE.** |
+| B5.24 | 🚀 Implémenter Edge Function `creer-gestionnaire` | B5.23 | Test B5.23 passe au VERT. L'Edge Function utilise `supabase.auth.admin.createUser()` (service_role) pour créer le user GoTrue avec custom claim `role: GESTIONNAIRE`, puis INSERT dans `public.utilisateurs`. Marque le mot de passe comme temporaire dans les user metadata. |
+| B5.25 | 🧪 Créer le test d'abord : Edge Function `modifier-statut-gestionnaire` | B5.2, B5.3 | Test : POST `/functions/v1/admin/gestionnaire/{id}/statut` avec `{actif: false}` (rôle ADMIN) → 200. Vérifie : user GoTrue banni (ne peut plus se connecter) + `public.utilisateurs.actif = false`. Réactivation : `{actif: true}` → user débanni. Entrée dans journal_audit. **Test ROUGE.** |
+| B5.26 | 🚀 Implémenter Edge Function `modifier-statut-gestionnaire` | B5.25 | Test B5.25 passe au VERT. Utilise `supabase.auth.admin.updateUserById(id, {banned: true/false})` + UPDATE `public.utilisateurs SET actif = ...`. Journalise l'action (DESACTIVATION_COMPTE / ACTIVATION_COMPTE). |
+
+**Total Phase B5 : 26 tâches**
 
 ---
 
@@ -294,12 +304,12 @@
 | Phase | Nb tâches | Objectif |
 |---|---|---|
 | B1 — Setup | 7 | Monorepo + CI opérationnels |
-| B2 — BDD | 27 | Schéma complet + RLS + triggers + fonctions SQL |
+| B2 — BDD | 28 | Schéma complet + RLS + triggers + fonctions SQL + vue enrichie |
 | B3 — Tests TDD | 25 | Tous les tests ROUGES écrits |
 | B4 — Logique métier | 14 | Tous les tests VERTS |
-| B5 — Endpoints | 22 | Edge Functions + RPC |
+| B5 — Endpoints | 26 | Edge Functions + RPC (incl. gestion utilisateur GoTrue) |
 | B6 — Tests E2E | 8 | Flux complets validés |
-| **TOTAL** | **103** | — |
+| **TOTAL** | **108** | — |
 
 ---
 
